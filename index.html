@@ -1,68 +1,44 @@
 <!--
-[JST 2026-01-20 19:00]  bidder/index.html  v20260120-01
+[JST 2026-01-20 19:10]  bidder/index.html  v20260120-02
 入札者フォーム（単一入札専用 / bidNo固定）
-要件（確定）:
+
+[要件]
   - 認証メッセージは「認証コードを入力してください。」に統一
   - 「数量」表記は「予定数量」
   - 合計金額は表示しない
-  - closed後は完全閲覧モード（入力不可・保存不可・読込/印刷/PDFは可）
+  - closed後は完全閲覧モード（入力不可・保存不可）
   - 品名/規格は1セル2段表示
   - 入力済データの読み込み / 印刷 / PDF出力 / Cookie削除ボタン
   - 入札者情報（6項目）は認証後必須、Cookie保存して次回自動入力
-  - JSは機能別に分割、先頭に番号を付ける
-  - DOM(id)は固定し、修正時は最小にする
+  - JSは機能別分割＆先頭に番号
+  - Firebase compat + initializeApp をこのHTMLで実施（Edge95想定）
 -->
 <!doctype html>
 <html lang="ja">
 <head>
-  <!-- [IDX-01] 基本メタ -->
+  <!-- [H-01] 基本メタ -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>入札フォーム（入札者）</title>
 
-  <!-- [IDX-02] CSS（画面＋印刷） -->
+  <!-- [H-02] CSS -->
   <link rel="stylesheet" href="css/bidder.css" />
-
-  <!-- [IDX-03] 最低限のベーススタイル（CSS未作成でも崩れない保険） -->
-  <style>
-    body{ font-family: system-ui, -apple-system, "Segoe UI", Arial, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; margin:0; padding:0; }
-    .wrap{ max-width: 980px; margin: 0 auto; padding: 12px; }
-    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .card{ border:1px solid #ddd; border-radius:10px; padding:10px; margin:10px 0; }
-    .muted{ color:#666; font-size: 0.95em; }
-    .k{ font-weight:600; }
-    .btn{ padding:10px 12px; border:1px solid #999; background:#f6f6f6; border-radius:10px; cursor:pointer; }
-    .btn:disabled{ opacity:.5; cursor:not-allowed; }
-    .field{ display:flex; flex-direction:column; gap:4px; min-width: 260px; }
-    .field input{ padding:10px; border:1px solid #ccc; border-radius:10px; }
-    .msg{ padding:10px; border-radius:10px; }
-    .msg.err{ background:#ffecec; border:1px solid #ffb3b3; }
-    .msg.ok{ background:#eaffea; border:1px solid #a9e9a9; }
-    .msg.info{ background:#eef6ff; border:1px solid #b6d7ff; }
-    table{ width:100%; border-collapse:collapse; }
-    th,td{ border:1px solid #ddd; padding:8px; vertical-align:top; }
-    th{ background:#f5f5f5; }
-    .itemName{ font-weight:600; }
-    .itemSpec{ color:#444; margin-top:4px; }
-    #itemsTableWrap{ overflow:auto; }
-    #logBox{ white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; height: 180px; overflow:auto; border:1px solid #ddd; border-radius:10px; padding:10px; background:#fafafa; }
-  </style>
 </head>
 
 <body>
-  <!-- [IDX-10] ルート -->
+  <!-- [B-01] ルート -->
   <div id="appRoot" class="wrap">
 
-    <!-- [IDX-11] タイトル行 -->
+    <!-- [B-02] ヘッダー -->
     <div class="row" style="justify-content:space-between;">
       <div id="appTitle" class="k" style="font-size:1.2em;">入札フォーム（入札者）</div>
       <div class="muted">
-        <span id="appVersion">v20260120-01</span>
+        <span id="appVersion">v20260120-02</span>
       </div>
     </div>
 
-    <!-- [IDX-20] ステータスバー（常時表示） -->
+    <!-- [B-10] ステータスバー（常時表示） -->
     <div id="statusBar" class="card">
       <div class="row">
         <div><span class="k">入札番号:</span> <span id="sbBidNo">(未設定)</span></div>
@@ -77,7 +53,7 @@
       </div>
     </div>
 
-    <!-- [IDX-30] 操作ボタンバー（常時表示） -->
+    <!-- [B-20] 操作ボタンバー（常時表示） -->
     <div id="toolbar" class="card">
       <div class="row">
         <button id="btnLoadOffer" class="btn" type="button">入力済データの読み込み</button>
@@ -90,14 +66,14 @@
       </div>
     </div>
 
-    <!-- [IDX-40] メッセージ領域（常時表示） -->
+    <!-- [B-30] メッセージ領域（常時表示） -->
     <div id="msgArea" class="card">
       <div id="msgError" class="msg err" style="display:none;"></div>
       <div id="msgInfo" class="msg info">認証コードを入力してください。</div>
       <div id="msgOk" class="msg ok" style="display:none;"></div>
     </div>
 
-    <!-- [IDX-50] 認証セクション -->
+    <!-- [B-40] 認証セクション -->
     <div id="authSection" class="card">
       <div id="authTitle" class="k">入札認証</div>
       <div class="muted" id="authHint" style="margin:6px 0 10px;">
@@ -115,7 +91,7 @@
       <div id="authResult" class="muted" style="margin-top:8px;"></div>
     </div>
 
-    <!-- [IDX-60] 入札者情報（認証後に必須） -->
+    <!-- [B-50] 入札者情報（認証後に必須・Cookie） -->
     <div id="profileSection" class="card">
       <div id="profileTitle" class="k">入札者情報（必須）</div>
       <div id="profileNotice" class="muted" style="margin:6px 0 10px;">
@@ -161,7 +137,7 @@
       </div>
     </div>
 
-    <!-- [IDX-70] 入札概要（ヘッダー情報） -->
+    <!-- [B-60] 入札概要（ヘッダー表示：備考5は非表示） -->
     <div id="bidInfoSection" class="card">
       <div id="bidInfoTitle" class="k">入札概要</div>
 
@@ -184,7 +160,7 @@
       </div>
     </div>
 
-    <!-- [IDX-80] 品目一覧（2段表示 / 予定数量 / 合計なし） -->
+    <!-- [B-70] 品目一覧（2段表示／予定数量／合計なし） -->
     <div id="itemsSection" class="card">
       <div id="itemsTitle" class="k">品目一覧</div>
       <div class="muted" style="margin:6px 0 10px;">
@@ -206,27 +182,12 @@
               <th style="width:140px;">入札単価</th>
             </tr>
           </thead>
-          <tbody id="itemsTbody">
-            <!-- [IDX-81] JSで行を生成（例）
-              <tr id="itemRow_1">
-                <td>1</td>
-                <td>〇</td>
-                <td>
-                  <div class="itemName">白米</div>
-                  <div class="itemSpec">北海道産ななつぼし</div>
-                </td>
-                <td>500</td>
-                <td>kg</td>
-                <td></td>
-                <td><input id="unitPrice_1" ... /></td>
-              </tr>
-            -->
-          </tbody>
+          <tbody id="itemsTbody"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- [IDX-90] 保存（提出） -->
+    <!-- [B-80] 保存（提出：open中のみ、上書き可） -->
     <div id="submitSection" class="card">
       <div class="row" style="justify-content:space-between;">
         <div>
@@ -239,9 +200,8 @@
       </div>
     </div>
 
-    <!-- [IDX-95] 印刷用エリア（CSSで切替。まずは同一内容を再利用） -->
+    <!-- [B-90] 印刷用エリア（印刷時のみ表示：レイアウトは作りながら整える） -->
     <div id="printArea" class="card" style="display:none;">
-      <!-- [IDX-95-1] JS/CSS側で印刷時に show する前提。構造だけ確保。 -->
       <div class="k">入札控え</div>
       <div class="muted">出力日時: <span id="printDatetime">-</span></div>
       <div class="muted">※合計金額は表示しません。</div>
@@ -271,7 +231,7 @@
       </div>
     </div>
 
-    <!-- [IDX-99] ログ -->
+    <!-- [B-99] ログ -->
     <div id="logSection" class="card">
       <div class="row" style="justify-content:space-between;">
         <div id="logTitle" class="k">ログ</div>
@@ -285,7 +245,37 @@
 
   </div><!-- /appRoot -->
 
-  <!-- [IDX-200] JS読み込み（番号順） -->
+  <!-- ========================================================= -->
+  <!-- [FB-01] Firebase (compat) : Edge95想定 -->
+  <!-- ========================================================= -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- [FB-02] Firebase initialize : あなたが提示した firebaseConfig -->
+  <!-- ========================================================= -->
+  <script>
+    // [FB-02-01] 設定
+    var firebaseConfig = {
+      apiKey: "AIzaSyAAinuBPDNjxQ63TEgDnRjP2pfWIXRBrQ0",
+      authDomain: "bidding-920b8.firebaseapp.com",
+      projectId: "bidding-920b8",
+      storageBucket: "bidding-920b8.firebasestorage.app",
+      messagingSenderId: "554171859200",
+      appId: "1:554171859200:web:1b1412a6a8c57fc9a4f3e5",
+      measurementId: "G-HC01P1974L"
+    };
+
+    // [FB-02-02] 二重初期化防止
+    if (!firebase.apps || !firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+  </script>
+
+  <!-- ========================================================= -->
+  <!-- [JS-LOAD] bidder用 JS（番号順） -->
+  <!-- ========================================================= -->
   <script src="js/01_bidder_config.js"></script>
   <script src="js/02_bidder_state.js"></script>
   <script src="js/03_bidder_log.js"></script>
