@@ -1,1 +1,182 @@
-aaa
+/* 
+[JST 2026-01-20 19:00]  bidder/css/bidder.css  v20260120-01
+入札者フォーム CSS（画面＋印刷）
+*/
+
+/* [CSS-01] ベース */
+:root{
+  --bg:#f7f7f7;
+  --panel:#ffffff;
+  --border:#d9d9d9;
+  --muted:#666;
+  --text:#222;
+  --okbg:#eaffea;
+  --okbd:#a9e9a9;
+  --errbg:#ffecec;
+  --errbd:#ffb3b3;
+  --infobg:#eef6ff;
+  --infobd:#b6d7ff;
+}
+
+html, body{
+  height:100%;
+}
+body{
+  margin:0;
+  color:var(--text);
+  background:var(--bg);
+  font-family: system-ui, -apple-system, "Segoe UI", Arial, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+}
+
+/* [CSS-02] レイアウト */
+.wrap{
+  max-width:980px;
+  margin:0 auto;
+  padding:12px;
+}
+.row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.k{ font-weight:600; }
+.muted{ color:var(--muted); font-size:0.95em; }
+
+.card{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px;
+  margin:10px 0;
+}
+
+/* [CSS-03] ボタン */
+.btn{
+  padding:10px 12px;
+  border:1px solid #999;
+  background:#f6f6f6;
+  border-radius:10px;
+  cursor:pointer;
+}
+.btn:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+}
+
+/* [CSS-04] メッセージ */
+.msg{
+  padding:10px;
+  border-radius:10px;
+  margin:6px 0;
+}
+.msg.err{
+  background:var(--errbg);
+  border:1px solid var(--errbd);
+}
+.msg.ok{
+  background:var(--okbg);
+  border:1px solid var(--okbd);
+}
+.msg.info{
+  background:var(--infobg);
+  border:1px solid var(--infobd);
+}
+
+/* [CSS-05] フォーム */
+.field{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:260px;
+}
+.field input{
+  padding:10px;
+  border:1px solid #ccc;
+  border-radius:10px;
+}
+
+/* [CSS-06] テーブル */
+#itemsTableWrap{
+  overflow:auto;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+th, td{
+  border:1px solid var(--border);
+  padding:8px;
+  vertical-align:top;
+}
+th{
+  background:#f5f5f5;
+}
+.itemName{ font-weight:600; }
+.itemSpec{ color:#444; margin-top:4px; }
+
+/* [CSS-07] 単価入力（狭い画面で崩れにくく） */
+.priceInput{
+  width:110px;
+  padding:8px;
+  border:1px solid #ccc;
+  border-radius:10px;
+  text-align:right;
+}
+
+/* [CSS-08] ログ */
+#logBox{
+  white-space:pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size:12px;
+  height:180px;
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px;
+  background:#fafafa;
+}
+
+/* [CSS-09] 印刷（printAreaを使う） */
+@media print{
+  body{
+    background:#fff;
+  }
+  /* 画面用は非表示 */
+  #toolbar,
+  #msgArea,
+  #authSection,
+  #logSection,
+  #submitSection{
+    display:none !important;
+  }
+
+  /* 印刷用表示 */
+  #printArea{
+    display:block !important;
+    border:0 !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  /* ステータスバーは簡易表示にしたい場合はJS側でprintAreaへ転記 */
+  #statusBar{
+    border:0 !important;
+  }
+
+  .card{
+    border:0 !important;
+    border-radius:0 !important;
+    padding:0 !important;
+    margin:0 0 10px 0 !important;
+  }
+
+  /* 印刷で見切れにくく */
+  #itemsTableWrap{
+    overflow:visible !important;
+  }
+
+  a, button, input{
+    display:none !important;
+  }
+}
