@@ -1,4 +1,4 @@
-// [JST 2026-01-20 19:00] 07_bidder_offer.js
+// [JST 2026-01-21 19:00] 07_bidder_offer.js  v20260121-01
 // [BID-07] 入札（offers）: 単価入力・保存・読込
 (function (global) {
   var BID = global.BID = global.BID || {};
@@ -33,7 +33,7 @@
     // [BID-07-03-01] 保存ドキュメント（集計に必要な情報を同梱）
     var doc = {
       bidderId: bidderId,                 // 冗長だが、集計・監査で便利
-      authCode: authCode || "",           // ※必要なら。不要なら削除可
+      authCode: authCode || "",           // ※不要なら後で削除可（最小修正のため保持）
       profile: {
         email: (profile && profile.email) ? profile.email : "",
         address: (profile && profile.address) ? profile.address : "",
@@ -46,7 +46,7 @@
       updatedAt: new Date().toISOString()
     };
 
-    // [BID-07-03-02] set(merge:true) で上書きOK
+    // [BID-07-03-02] set(merge:true) で上書き更新
     return offerDocRef(db, bidNo, bidderId).set(doc, { merge: true });
   };
 
