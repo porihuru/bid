@@ -1,14 +1,21 @@
-// [JST 2026-01-20 19:00]  bidder/js/04_bidder_db.js  v20260120-01
+// [JST 2026-01-21 19:00]  bidder/js/04_bidder_db.js  v20260121-01
+// [BID-04] Firestoreアクセス層（Edge95 / firebase compat）
+//   - 「誰でも入れる」方針のため、Authは必須にしない（Firestoreのみで動作可）
 (function (global) {
   var BID = global.BID = global.BID || {};
 
   // =========================================================
   // [04-01] Firebase前提（firebase compat: global firebase）
   //   - firebase.initializeApp(...) 済み
-  //   - firebase.auth(), firebase.firestore() が使える想定
+  //   - firebase.firestore() が使える想定
+  //   - firebase.auth() は「あれば使う」程度（無くても動く）
   // =========================================================
-  function hasFirebase() {
-    return (typeof firebase !== "undefined") && firebase.auth && firebase.firestore;
+  function hasFirebaseFirestore() {
+    return (typeof firebase !== "undefined") && firebase.firestore;
+  }
+
+  function hasFirebaseAuth() {
+    return (typeof firebase !== "undefined") && firebase.auth;
   }
 
   function nowIso() { return new Date().toISOString(); }
@@ -22,20 +29,39 @@
   // [04-02] DB API
   // =========================================================
   BID.DB = {
-    // [04-03] 初期チェック
+    // ---------------------------------------------------------
+    // [04-03] 初期チェック（Firestoreのみ必須）
+    // ---------------------------------------------------------
     ensure: function () {
-      if (!hasFirebase()) {
-        throw new Error("Firebaseが初期化されていません（firebase auth/firestore が見つかりません）。");
+      if (!hasFirebaseFirestore()) {
+        throw new Error("Firebaseが初期化されていません（firebase.firestore が見つかりません）。");
       }
     },
 
-    // [04-04] ログイン監視
-    onAuthStateChanged: function (cb) {
+    // ---------------------------------------------------------
+    // [04-04] ★追加★ Firestore インスタンス取得（07_bidder_offer.js と整合）
+    // ---------------------------------------------------------
+    getDB: function () {
       BID.DB.ensure();
+      return firebase.firestore();
+    },
+
+    // ---------------------------------------------------------
+    // [04-05] （互換）ログイン監視：Authがある場合のみ
+    //   ※「誰でも入れる」では必須ではない
+    // ---------------------------------------------------------
+    onAuthStateChanged: function (cb) {
+      if (!hasFirebaseAuth()) {
+        // auth無し運用：即時に null を返す
+        if (cb) cb(null);
+        return function () {};
+      }
       return firebase.auth().onAuthStateChanged(cb);
     },
 
-    // [04-05] users/{uid} 取得（role/bidderNo）
+    // ---------------------------------------------------------
+    // [04-06] （互換）users/{uid} 取得：Auth前提機能（未使用なら呼ばない）
+    // ---------------------------------------------------------
     getUserDoc: function (uid) {
       BID.DB.ensure();
       return firebase.firestore().collection("users").doc(uid).get()
@@ -45,7 +71,9 @@
         });
     },
 
-    // [04-06] bids/{bidNo} 取得
+    // ---------------------------------------------------------
+    // [04-07] bids/{bidNo} 取得
+    // ---------------------------------------------------------
     getBid: function (bidNo) {
       BID.DB.ensure();
       return firebase.firestore().collection("bids").doc(bidNo).get()
@@ -55,7 +83,9 @@
         });
     },
 
-    // [04-07] bids/{bidNo}/items 全件（seq昇順）
+    // ---------------------------------------------------------
+    // [04-08] bids/{bidNo}/items 全件（seq昇順）
+    // ---------------------------------------------------------
     getItems: function (bidNo) {
       BID.DB.ensure();
       return firebase.firestore().collection("bids").doc(bidNo).collection("items").get()
@@ -65,46 +95,62 @@
             var d = doc.data() || {};
             arr.push(d);
           });
-          // seq昇順
           arr.sort(function (a, b) { return Number(a.seq) - Number(b.seq); });
           return arr;
         });
     },
 
-    // [04-08] offers 読込: bids/{bidNo}/offers/{bidderNo}
-    getOffer: function (bidNo, bidderNo) {
+    // ---------------------------------------------------------
+    // [04-09] offers 読込: bids/{bidNo}/offers/{bidderId}
+    // ---------------------------------------------------------
+    getOffer: function (bidNo, bidderId) {
       BID.DB.ensure();
       var sub = BID.CONFIG.OFFERS_SUBCOL || "offers";
-      return firebase.firestore().collection("bids").doc(bidNo).collection(sub).doc(String(bidderNo)).get()
+      return firebase.firestore().collection("bids").doc(bidNo).collection(sub).doc(String(bidderId)).get()
         .then(function (snap) {
           if (!snap.exists) return null;
           return snap.data();
         });
     },
 
-    // [04-09] offers 上書き保存（open中のみ：rulesで制御）
-    upsertOffer: function (bidNo, bidderNo, payload, isCreateIfMissing) {
+    // ---------------------------------------------------------
+    // [04-10] offers 上書き保存（open中のみ：rulesで制御）
+    //   - 誰でも入れる運用：Authが無い場合も落ちないようにする
+    // ---------------------------------------------------------
+    upsertOffer: function (bidNo, bidderId, payload) {
       BID.DB.ensure();
       var sub = BID.CONFIG.OFFERS_SUBCOL || "offers";
-      var ref = firebase.firestore().collection("bids").doc(bidNo).collection(sub).doc(String(bidderNo));
+      var ref = firebase.firestore().collection("bids").doc(bidNo).collection(sub).doc(String(bidderId));
 
-      // [04-10] createdAt維持（既存があるなら上書きしない）
       return ref.get().then(function (snap) {
         var exists = snap.exists;
         var base = payload || {};
+
+        // createdAt は初回のみ付与（既存があれば維持）
         if (!exists) {
           base.createdAt = nowIso();
         } else {
-          // 既存 createdAt があるなら残す
           try {
             var old = snap.data() || {};
             if (old.createdAt) base.createdAt = old.createdAt;
           } catch (e) {}
         }
+
         base.updatedAt = nowIso();
+
+        // 集計・監査のため冗長に入れる（キーと同じでもOK）
         base.bidNo = String(bidNo);
-        base.bidderNo = String(bidderNo);
-        base.updatedByUid = (firebase.auth().currentUser && firebase.auth().currentUser.uid) ? firebase.auth().currentUser.uid : "";
+        base.bidderId = String(bidderId);   // ★主キー
+        base.bidderNo = String(bidderId);   // ★互換（旧名が残っても困らないように）
+
+        // auth があれば uid を入れる（無ければ空）
+        var uid = "";
+        try {
+          if (hasFirebaseAuth() && firebase.auth().currentUser && firebase.auth().currentUser.uid) {
+            uid = firebase.auth().currentUser.uid;
+          }
+        } catch (e) {}
+        base.updatedByUid = uid;
 
         // set(..., {merge:true}) で上書き更新
         return ref.set(base, { merge: true }).then(function () {
@@ -113,7 +159,9 @@
       });
     },
 
+    // ---------------------------------------------------------
     // [04-11] bidsのnote5（認証コード）取得（フォールバック：旧note）
+    // ---------------------------------------------------------
     getAuthCodeFromBid: function (bidDoc) {
       var k = (BID.CONFIG && BID.CONFIG.NOTE_KEYS) ? BID.CONFIG.NOTE_KEYS : {};
       var code = getNote(bidDoc, k.note5 || "note5");
@@ -124,7 +172,9 @@
       return legacy || "";
     },
 
+    // ---------------------------------------------------------
     // [04-12] note1-4 表示用（旧noteしかない場合はnote1へ寄せる）
+    // ---------------------------------------------------------
     getPublicNotesFromBid: function (bidDoc) {
       var k = (BID.CONFIG && BID.CONFIG.NOTE_KEYS) ? BID.CONFIG.NOTE_KEYS : {};
       var n1 = getNote(bidDoc, k.note1 || "note1");
