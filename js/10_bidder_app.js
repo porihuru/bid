@@ -12,6 +12,30 @@
   function el(id) { return document.getElementById(id); }
   function nowIso() { return new Date().toISOString(); }
 
+  // =========================================================
+  // [10-00] 追加：共通ログ＆画面通知（ボタン無反応対策）
+  // =========================================================
+  function report(action, ok, detail) {
+    var msg = action + " : " + (ok ? "OK" : "NG") + (detail ? (" / " + detail) : "");
+    try { BID.Log.write("[ui] " + msg); } catch (e) {}
+    try {
+      if (ok) BID.Render.setOk(msg);
+      else BID.Render.setError(msg);
+    } catch (e2) {}
+  }
+
+  function safeRun(action, fn) {
+    try {
+      BID.Log.write("[ui] click: " + action);
+      BID.Render.setInfo(action + " を実行中...");
+      return fn();
+    } catch (e) {
+      var m = (e && e.message) ? e.message : String(e);
+      report(action, false, "例外: " + m);
+    }
+  }
+
+
   BID.App = {
     boot: function () {
       // =====================================================
