@@ -49,5 +49,24 @@
     // [BID-07-03-02] set(merge:true) で上書き更新
     return offerDocRef(db, bidNo, bidderId).set(doc, { merge: true });
   };
+  
+  // =========================================================
+// [BID-07-04] 単価 lines をテーブルへ反映
+//  - lines: { "1": 123, "2": 456, ... }
+// =========================================================
+BID.Offer.applyLinesToTable = function (lines) {
+  lines = lines || {};
+
+  for (var seq in lines) {
+    if (!lines.hasOwnProperty(seq)) continue;
+
+    var inp = document.getElementById("unitPrice_" + seq);
+    if (inp) {
+      inp.value = lines[seq];
+    }
+  }
+};
+  
+  
 
 })(window);
