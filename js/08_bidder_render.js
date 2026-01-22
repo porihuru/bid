@@ -232,6 +232,38 @@
       BID.Render.renderStatusBar();
     },
 
+      // =========================================================
+      // [08-08-90] 追加：入力可否の判定結果をユーザーに見える形で常時表示
+      //   - ボタンがdisabledで押せない場合でも、理由が必ず分かるようにする
+      // =========================================================
+      try {
+        // 画面（submitStatus）があればそこにも出す（なければ無視）
+        var ss = el("submitStatus");
+        if (ss) {
+          ss.textContent =
+            "判定: status=" + (status || "(none)") +
+            " / auth=" + (st.authState || "(none)") +
+            " / profile=" + (st.profileState || "(none)") +
+            " / inputEnabled=" + (st.inputEnabled ? "true" : "false") +
+            " / viewOnly=" + (st.viewOnly ? "true" : "false");
+        }
+
+        // ログにも常時出す（うるさければ後で抑制可能）
+        if (BID && BID.Log && BID.Log.write) {
+          BID.Log.write(
+            "[mode] status=" + (status || "(none)") +
+            " auth=" + (st.authState || "(none)") +
+            " profile=" + (st.profileState || "(none)") +
+            " inputEnabled=" + (st.inputEnabled ? "true" : "false") +
+            " viewOnly=" + (st.viewOnly ? "true" : "false") +
+            " reason=" + reason
+          );
+        }
+      } catch (e) {
+        // ここで落ちると本末転倒なので握りつぶす
+      }
+
+
     // [08-09] 全体描画
     renderAll: function () {
       BID.Render.renderStatusBar();
