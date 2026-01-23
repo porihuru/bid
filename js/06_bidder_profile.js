@@ -1,5 +1,9 @@
-// [JST 2026-01-20 19:00] 06_bidder_profile.js
+// [JST 2026-01-23 21:15] bidder/js/06_bidder_profile.js v20260123-01
 // [BID-06] 入札者情報（必須6項目 + 入札者番号）と Cookie
+// 互換方針:
+//  - 以前提示した実装（readFromUI/validate/applyToUI）を維持
+//  - 新実装側が呼ぶ readFromInputs/validateRequired/applyToInputs も提供
+
 (function (global) {
   var BID = global.BID = global.BID || {};
   BID.Profile = BID.Profile || {};
@@ -55,7 +59,7 @@
   };
 
   // =========================================================
-  // [BID-06-04] 必須チェック（入札者番号 + 6項目）
+  // [BID-06-04] 必須チェック（旧: 文字列 / 新: 配列）
   // =========================================================
   BID.Profile.validate = function (p) {
     if (!p.bidderId) return "入札者番号が未入力です。";
@@ -104,7 +108,7 @@
   };
 
   // =========================================================
-  // [BID-06-06] UIへ反映（入力済データの読み込みボタン用）
+  // [BID-06-06] UIへ反映
   // =========================================================
   BID.Profile.applyToUI = function (p) {
     if (document.getElementById("inpBidderId")) document.getElementById("inpBidderId").value = p.bidderId || "";
@@ -114,6 +118,26 @@
     if (document.getElementById("inpRepresentativeName")) document.getElementById("inpRepresentativeName").value = p.representativeName || "";
     if (document.getElementById("inpContactName")) document.getElementById("inpContactName").value = p.contactName || "";
     if (document.getElementById("inpContactInfo")) document.getElementById("inpContactInfo").value = p.contactInfo || "";
+  };
+
+  // =========================================================
+  // [BID-06-90] 互換エイリアス（新コード側が呼ぶ）
+  // =========================================================
+  BID.Profile.readFromInputs = BID.Profile.readFromUI;
+  BID.Profile.applyToInputs = BID.Profile.applyToUI;
+
+  // [BID-06-91] 必須チェック（配列で返す：render側が join できる）
+  BID.Profile.validateRequired = function (p) {
+    p = p || {};
+    var miss = [];
+    if (!p.bidderId) miss.push("入札者番号");
+    if (!p.email) miss.push("メールアドレス");
+    if (!p.address) miss.push("住所");
+    if (!p.companyName) miss.push("会社名");
+    if (!p.representativeName) miss.push("代表者名");
+    if (!p.contactName) miss.push("担当者名");
+    if (!p.contactInfo) miss.push("担当者・連絡先");
+    return miss;
   };
 
 })(window);
