@@ -1,9 +1,8 @@
-// [JST 2026-01-22 22:05] bidder/js/08_bidder_render.js v20260122-01
+// [JST 2026-01-23 22:10] bidder/js/08_bidder_render.js v20260123-01
 // [BID-08] 描画・表示制御（ログイン不要対応）
-// 変更点:
-//  - [08-08-20] st.user 判定による「未ログインです」表示を撤廃
-//  - [08-08-11] inpBidderId も入力可否制御に含める
-//  - 認証結果が確実に画面に反映されるよう applyMode が常に setInfo を更新
+// 変更点（重要）:
+//  - renderItems() で BID.Offer.applyLinesToTable が無い場合でも落ちない
+//  - applyMode() の末尾で submitStatus に判定結果を常時表示（理由が分かる）
 
 (function (global) {
   var BID = global.BID = global.BID || {};
@@ -21,6 +20,10 @@
     if (e) e.textContent = (s == null) ? "" : String(s);
   }
 
+  function safeLog(msg) {
+    try { if (BID.Log && BID.Log.write) BID.Log.write(msg); } catch (e) {}
+  }
+
   // =========================================================
   // [08-01] 描画・表示制御
   // =========================================================
@@ -29,7 +32,7 @@
     clearMessages: function () {
       show("msgError", false); setText("msgError", "");
       show("msgOk", false); setText("msgOk", "");
-      setText("msgInfo", BID.CONFIG.MSG_AUTH_PROMPT);
+      setText("msgInfo", (BID.CONFIG && BID.CONFIG.MSG_AUTH_PROMPT) ? BID.CONFIG.MSG_AUTH_PROMPT : "認証コードを入力してください。");
     },
 
     setError: function (msg) {
@@ -55,14 +58,16 @@
       setText("authResult", msg || "");
     },
 
-    // [08-04] プロファイル状態表示
-    setProfileStatus: function (missArr) {
-      missArr = missArr || [];
-      if (!missArr.length) {
-        setText("profileStatus", "必須入力：OK");
-      } else {
-        setText("profileStatus", "必須未入力： " + missArr.join(" / "));
+    // [08-04] プロファイル状態表示（missArr でも文字列でも可）
+    setProfileStatus: function (miss) {
+      // miss: [] / "エラー文" / "" などを許容
+      if (typeof miss === "string") {
+        setText("profileStatus", miss ? ("必須未入力： " + miss) : "必須入力：OK");
+        return;
       }
+      miss = miss || [];
+      if (!miss.length) setText("profileStatus", "必須入力：OK");
+      else setText("profileStatus", "必須未入力： " + miss.join(" / "));
     },
 
     setProfileAutoFillNote: function (msg) {
@@ -73,7 +78,10 @@
     renderStatusBar: function () {
       var st = BID.State.get();
       setText("sbBidNo", st.bidNo || "(未設定)");
-      setText("sbBidStatus", st.bidStatus ? (BID.CONFIG.STATUS_LABELS[st.bidStatus] || st.bidStatus) : "(未読込)");
+
+      var labels = (BID.CONFIG && BID.CONFIG.STATUS_LABELS) ? BID.CONFIG.STATUS_LABELS : {};
+      setText("sbBidStatus", st.bidStatus ? (labels[st.bidStatus] || st.bidStatus) : "(未読込)");
+
       setText("sbAuthState", st.authState || "LOCKED");
       setText("sbInputState", st.inputEnabled ? "可" : "不可");
       setText("sbMode", st.viewOnly ? "VIEW-ONLY" : "EDIT");
@@ -85,7 +93,7 @@
     renderBidInfo: function () {
       var st = BID.State.get();
       var b = st.bid || {};
-      var notes = BID.DB.getPublicNotesFromBid(b);
+      var notes = (BID.DB && BID.DB.getPublicNotesFromBid) ? BID.DB.getPublicNotesFromBid(b) : { note1:"",note2:"",note3:"",note4:"" };
 
       setText("txtTo1", b.to1 || "");
       setText("txtTo2", b.to2 || "");
@@ -166,7 +174,16 @@
         tbody.appendChild(tr);
       }
 
-      BID.Offer.applyLinesToTable(st.offerLines);
+      // 既存 lines を反映（Offerが未読込でも落とさない）
+      try {
+        if (BID.Offer && BID.Offer.applyLinesToTable) {
+          BID.Offer.applyLinesToTable(st.offerLines);
+        } else {
+          safeLog("[render] NOTE: BID.Offer.applyLinesToTable is missing");
+        }
+      } catch (e) {
+        safeLog("[render] applyLinesToTable ERROR: " + (e && e.message ? e.message : e));
+      }
     },
 
     // [08-08] 入力可否・モード制御
@@ -186,7 +203,7 @@
       }
       BID.State.setInputEnabled(canInput);
 
-      // [08-08-10] 認証UI（open以外は無効）
+      // 認証UI（open以外は無効）
       show("authSection", true);
       if (status === "open") {
         if (el("authCode")) el("authCode").disabled = false;
@@ -196,7 +213,7 @@
         if (el("btnAuth")) el("btnAuth").disabled = true;
       }
 
-      // [08-08-11] 入札者情報UI（openかつ認証後のみ入力可）
+      // 入札者情報UI（openかつ認証後のみ入力可）
       var profileInputs = ["inpBidderId","inpEmail","inpAddress","inpCompanyName","inpRepresentativeName","inpContactName","inpContactInfo"];
       var profileEditable = (!viewOnly && status === "open" && st.authState === "UNLOCKED");
       for (var i = 0; i < profileInputs.length; i++) {
@@ -204,7 +221,7 @@
         if (ei) ei.disabled = !profileEditable;
       }
 
-      // [08-08-12] 単価入力欄
+      // 単価入力欄
       var items = st.items || [];
       for (var j = 0; j < items.length; j++) {
         var seq = String(items[j].seq);
@@ -212,32 +229,23 @@
         if (ip) ip.disabled = !canInput;
       }
 
-      // [08-08-13] 保存ボタン
+      // 保存ボタン
       if (el("btnSubmit")) el("btnSubmit").disabled = !canInput;
 
-      // [08-08-20] 画面メッセージ（常時理由）
-      // ★ログイン不要仕様なので st.user 判定はしない
+      // 画面メッセージ（常時理由）
       var reason = "";
       if (!status) reason = "入札データを読み込み中です。";
       else if (status === "draft") reason = "この入札は準備中（draft）です。入札開始までお待ちください。";
       else if (status === "closed") reason = "入札は終了しました（closed）。完全閲覧モードです。";
-      else if (status === "open" && st.authState !== "UNLOCKED") reason = BID.CONFIG.MSG_AUTH_PROMPT;
+      else if (status === "open" && st.authState !== "UNLOCKED") reason = (BID.CONFIG && BID.CONFIG.MSG_AUTH_PROMPT) ? BID.CONFIG.MSG_AUTH_PROMPT : "認証コードを入力してください。";
       else if (status === "open" && st.authState === "UNLOCKED" && st.profileState !== "COMPLETE") reason = "入札者情報（必須）を入力してください。";
       else if (canInput) reason = "入札可能です。単価を入力して保存してください。（open中は上書き可）";
       else reason = "状態を確認中です。";
 
       BID.Render.setInfo(reason);
 
-      // ステータスバー反映
-      BID.Render.renderStatusBar();
-    },
-
-      // =========================================================
-      // [08-08-90] 追加：入力可否の判定結果をユーザーに見える形で常時表示
-      //   - ボタンがdisabledで押せない場合でも、理由が必ず分かるようにする
-      // =========================================================
+      // [08-08-90] 追加：判定結果を submitStatus に常時表示（押せない理由が分かる）
       try {
-        // 画面（submitStatus）があればそこにも出す（なければ無視）
         var ss = el("submitStatus");
         if (ss) {
           ss.textContent =
@@ -247,22 +255,11 @@
             " / inputEnabled=" + (st.inputEnabled ? "true" : "false") +
             " / viewOnly=" + (st.viewOnly ? "true" : "false");
         }
+      } catch (e2) {}
 
-        // ログにも常時出す（うるさければ後で抑制可能）
-        if (BID && BID.Log && BID.Log.write) {
-          BID.Log.write(
-            "[mode] status=" + (status || "(none)") +
-            " auth=" + (st.authState || "(none)") +
-            " profile=" + (st.profileState || "(none)") +
-            " inputEnabled=" + (st.inputEnabled ? "true" : "false") +
-            " viewOnly=" + (st.viewOnly ? "true" : "false") +
-            " reason=" + reason
-          );
-        }
-      } catch (e) {
-        // ここで落ちると本末転倒なので握りつぶす
-      }
-
+      // ステータスバー反映
+      BID.Render.renderStatusBar();
+    },
 
     // [08-09] 全体描画
     renderAll: function () {
