@@ -9,6 +9,8 @@
 //  - Firestore rules が匿名（signedInのみ）を許可していない場合、読込/保存は権限エラーになります。
 //    その場合も「理由」を必ず出します。
 
+BID.Build && BID.Build.report && BID.Build.report("10_bidder_app.js", "v20260123-01");
+
 (function (global) {
   var BID = global.BID = global.BID || {};
 
