@@ -1,9 +1,13 @@
-// [JST 2026-01-23 21:30] bidder/js/10_bidder_app.js v20260123-01
+// [JST 2026-01-23 22:10] bidder/js/10_bidder_app.js v20260123-01
 // [BID-10] アプリ起動・イベント配線（入札者フォーム）
 // 要件対応:
 //  - すべてのボタン押下後に「成功/失敗/理由」を必ず表示（ログ＋メッセージ）
-//  - 起動直後と「入力済データの読み込み」直後に、常に現在状態を反映
-//  - 入札者は「誰でも入れる」前提：Firebaseは匿名ログインを自動実行（可能なら）
+//  - 起動直後に bid/items を読み込み、状態を必ず反映
+//  - 匿名ログインを試みる（失敗したら理由を表示）
+//
+// 注意:
+//  - Firestore rules が匿名（signedInのみ）を許可していない場合、読込/保存は権限エラーになります。
+//    その場合も「理由」を必ず出します。
 
 (function (global) {
   var BID = global.BID = global.BID || {};
@@ -11,25 +15,40 @@
   function el(id) { return document.getElementById(id); }
   function nowIso() { return new Date().toISOString(); }
   function msgOf(e) { return (e && e.message) ? e.message : String(e || ""); }
+  function trim(s) { return (s == null) ? "" : String(s).replace(/^\s+|\s+$/g, ""); }
 
   // =========================================================
   // [BID-10-01] 共通ログ/表示
   // =========================================================
   function logInfo(tag, msg) {
-    if (BID.Log && BID.Log.write) BID.Log.write("[" + tag + "] " + msg);
+    try { if (BID.Log && BID.Log.write) BID.Log.write("[" + tag + "] " + msg); } catch (e) {}
   }
   function uiOk(msg) {
-    if (BID.Render && BID.Render.setOk) BID.Render.setOk(msg);
+    try { if (BID.Render && BID.Render.setOk) BID.Render.setOk(msg); } catch (e) {}
   }
   function uiErr(msg) {
-    if (BID.Render && BID.Render.setError) BID.Render.setError(msg);
+    try { if (BID.Render && BID.Render.setError) BID.Render.setError(msg); } catch (e) {}
   }
   function uiInfo(msg) {
-    if (BID.Render && BID.Render.setInfo) BID.Render.setInfo(msg);
+    try { if (BID.Render && BID.Render.setInfo) BID.Render.setInfo(msg); } catch (e) {}
   }
 
   // =========================================================
-  // [BID-10-02] 状態を強制反映（例外で止めない）
+  // [BID-10-02] 例外捕捉（何も起きないを潰す）
+  // =========================================================
+  window.onerror = function (message, source, lineno, colno) {
+    logInfo("EX", "window.onerror: " + message + " (" + source + ":" + lineno + ":" + colno + ")");
+    uiErr("実行エラー: " + message);
+    return false;
+  };
+  window.addEventListener("unhandledrejection", function (ev) {
+    var reason = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : "(unknown)";
+    logInfo("EX", "unhandledrejection: " + reason);
+    uiErr("処理エラー: " + reason);
+  });
+
+  // =========================================================
+  // [BID-10-03] 状態を強制反映（例外で止めない）
   // =========================================================
   function safeRenderAll(tag) {
     try {
@@ -42,90 +61,128 @@
   }
 
   // =========================================================
-  // [BID-10-03] 起動
+  // [BID-10-04] profileState の再計算
+  // =========================================================
+  function refreshProfileState() {
+    try {
+      if (!BID.Profile || !BID.Profile.readFromUI || !BID.Profile.validate) {
+        // Profile未読込は致命的
+        BID.State.setProfileState("INCOMPLETE");
+        BID.Render.setProfileStatus("Profileモジュール未読込");
+        return;
+      }
+      var p = BID.Profile.readFromUI();
+      BID.State.setProfile(p);
+
+      var perr = BID.Profile.validate(p); // 文字列（空ならOK）
+      if (perr) {
+        BID.State.setProfileState("INCOMPLETE");
+        BID.Render.setProfileStatus(perr);
+      } else {
+        BID.State.setProfileState("COMPLETE");
+        BID.Render.setProfileStatus("");
+      }
+    } catch (e) {
+      uiErr("状態更新エラー: " + msgOf(e));
+      logInfo("state", "ERROR " + msgOf(e));
+    }
+  }
+
+  // =========================================================
+  // [BID-10-05] App
   // =========================================================
   BID.App = {
     boot: function () {
-      // [BID-10-03-01] まず bidNo 固定値を state に取り込む
+      // まず固定入札番号をstateへ
       BID.State.initBidNo();
       logInfo("boot", "bidNo=" + (BID.State.get().bidNo || "(empty)"));
 
-      // [BID-10-03-02] 初期メッセージ/描画
+      // 初期表示
       if (BID.Render && BID.Render.clearMessages) BID.Render.clearMessages();
       uiInfo("入札データを読み込み中です。");
       safeRenderAll("boot");
 
-      // [BID-10-03-03] ボタン: ログクリア
+      // -----------------------------------------------------
+      // ボタン配線（すべて：開始/成功/失敗/理由 を出す）
+      // -----------------------------------------------------
+
+      // ログクリア
       if (el("btnLogClear")) {
         el("btnLogClear").addEventListener("click", function () {
+          logInfo("btnLogClear", "click");
           try {
-            BID.Log.clear();
-            logInfo("btn", "ログクリア: OK");
+            if (BID.Log && BID.Log.clear) BID.Log.clear();
             uiOk("ログをクリアしました。");
+            logInfo("btnLogClear", "OK");
           } catch (e) {
             uiErr("ログクリアに失敗: " + msgOf(e));
-            logInfo("btn", "ログクリア: FAILED " + msgOf(e));
+            logInfo("btnLogClear", "FAILED " + msgOf(e));
           }
         });
       }
 
-      // [BID-10-03-04] ボタン: Cookie削除
+      // Cookie削除
       if (el("btnCookieClear")) {
         el("btnCookieClear").addEventListener("click", function () {
+          logInfo("btnCookieClear", "click");
           try {
+            if (!BID.Profile || !BID.Profile.clearCookie) {
+              uiErr("Cookie削除に失敗: Profileモジュール未読込");
+              logInfo("btnCookieClear", "FAILED Profile module missing");
+              return;
+            }
             BID.Profile.clearCookie();
             uiOk("Cookieを削除しました。");
-            logInfo("cookie", "clear OK");
-            safeRenderAll("cookie");
+            logInfo("btnCookieClear", "OK");
+            refreshProfileState();
+            safeRenderAll("btnCookieClear");
           } catch (e) {
             uiErr("Cookie削除に失敗: " + msgOf(e));
-            logInfo("cookie", "clear FAILED " + msgOf(e));
+            logInfo("btnCookieClear", "FAILED " + msgOf(e));
           }
         });
       }
 
-      // [BID-10-03-05] ボタン: 入力済データの読み込み（offers）
+      // 入力済データの読み込み
       if (el("btnLoadOffer")) {
         el("btnLoadOffer").addEventListener("click", function () {
+          logInfo("btnLoadOffer", "click");
           BID.App.loadOffer();
         });
       }
 
-      // [BID-10-03-06] ボタン: 認証
+      // 認証
       if (el("btnAuth")) {
         el("btnAuth").addEventListener("click", function () {
+          logInfo("btnAuth", "click");
           try {
-            logInfo("auth", "clicked");
-            var ok = BID.Auth.tryAuth();
-            logInfo("auth", ok ? "OK" : "NG");
+            if (!BID.Auth || !BID.Auth.tryAuth) {
+              uiErr("認証に失敗: Authモジュール未読込（05_bidder_auth.js）");
+              logInfo("btnAuth", "FAILED Auth module missing");
+              return;
+            }
+            var ok = BID.Auth.tryAuth(); // 成否はAuth側でも表示される
+            logInfo("btnAuth", ok ? "OK" : "NG");
+
             // 認証後に状態計算→反映
-            BID.App.refreshComputedStates();
-            safeRenderAll("auth");
+            refreshProfileState();
+            safeRenderAll("btnAuth");
           } catch (e) {
             uiErr("認証処理エラー: " + msgOf(e));
-            logInfo("auth", "ERROR " + msgOf(e));
+            logInfo("btnAuth", "FAILED " + msgOf(e));
           }
         });
       }
 
-      // [BID-10-03-07] プロファイル入力イベント（入力のたびに必須判定）
-      var pids = [
-        "inpBidderId",
-        "inpEmail",
-        "inpAddress",
-        "inpCompanyName",
-        "inpRepresentativeName",
-        "inpContactName",
-        "inpContactInfo"
-      ];
+      // プロファイル入力（入力のたびに profileState を更新）
+      var pids = ["inpBidderId","inpEmail","inpAddress","inpCompanyName","inpRepresentativeName","inpContactName","inpContactInfo"];
       for (var i = 0; i < pids.length; i++) {
         (function (id) {
           var e = el(id);
           if (!e) return;
           e.addEventListener("input", function () {
             try {
-              BID.App.refreshComputedStates();
-              // applyModeは renderAll 内で呼ぶが、軽量化のため直接も呼ぶ
+              refreshProfileState();
               if (BID.Render && BID.Render.applyMode) BID.Render.applyMode();
             } catch (ex) {
               uiErr("入力反映エラー: " + msgOf(ex));
@@ -135,107 +192,113 @@
         })(pids[i]);
       }
 
-      // [BID-10-03-08] ボタン: 保存（提出）
+      // 保存（提出）
       if (el("btnSubmit")) {
         el("btnSubmit").addEventListener("click", function () {
+          logInfo("btnSubmit", "click");
           BID.App.submitOffer();
         });
       }
 
-      // [BID-10-03-09] ボタン: 印刷 / PDF
+      // 印刷 / PDF
       if (el("btnPrint")) {
         el("btnPrint").addEventListener("click", function () {
+          logInfo("btnPrint", "click");
           try {
-            logInfo("print", "clicked");
             if (!BID.Print || !BID.Print.doPrint) {
-              uiErr("印刷機能が未実装です（09_bidder_print.js を確認してください）。");
-              logInfo("print", "FAILED: Print module missing");
+              uiErr("印刷に失敗: Printモジュール未実装（09_bidder_print.js）");
+              logInfo("btnPrint", "FAILED Print module missing");
               return;
             }
             BID.Print.doPrint();
             uiOk("印刷を開始しました。");
-            logInfo("print", "OK");
+            logInfo("btnPrint", "OK");
           } catch (e) {
             uiErr("印刷に失敗: " + msgOf(e));
-            logInfo("print", "FAILED " + msgOf(e));
-          }
-        });
-      }
-      if (el("btnPdf")) {
-        el("btnPdf").addEventListener("click", function () {
-          // PDF出力は「印刷ダイアログからPDF保存」に統一
-          try {
-            logInfo("pdf", "clicked");
-            if (!BID.Print || !BID.Print.doPrint) {
-              uiErr("PDF出力機能が未実装です（09_bidder_print.js を確認してください）。");
-              logInfo("pdf", "FAILED: Print module missing");
-              return;
-            }
-            BID.Print.doPrint();
-            uiOk("PDF出力（印刷）を開始しました。");
-            logInfo("pdf", "OK");
-          } catch (e) {
-            uiErr("PDF出力に失敗: " + msgOf(e));
-            logInfo("pdf", "FAILED " + msgOf(e));
+            logInfo("btnPrint", "FAILED " + msgOf(e));
           }
         });
       }
 
-      // [BID-10-03-10] Cookie自動入力（起動時）
+      if (el("btnPdf")) {
+        el("btnPdf").addEventListener("click", function () {
+          logInfo("btnPdf", "click");
+          try {
+            if (!BID.Print || !BID.Print.doPrint) {
+              uiErr("PDF出力に失敗: Printモジュール未実装（09_bidder_print.js）");
+              logInfo("btnPdf", "FAILED Print module missing");
+              return;
+            }
+            BID.Print.doPrint(); // 印刷ダイアログからPDF保存
+            uiOk("PDF出力（印刷）を開始しました。");
+            logInfo("btnPdf", "OK");
+          } catch (e) {
+            uiErr("PDF出力に失敗: " + msgOf(e));
+            logInfo("btnPdf", "FAILED " + msgOf(e));
+          }
+        });
+      }
+
+      // Cookie自動入力（起動時）
       try {
-        var cp = BID.Profile.loadFromCookie();
-        var hasAny = false;
-        for (var k in cp) { if (cp.hasOwnProperty(k) && cp[k]) { hasAny = true; break; } }
-        if (hasAny) {
-          BID.Profile.applyToInputs(cp);
-          logInfo("cookie", "autofill OK");
+        if (BID.Profile && BID.Profile.loadFromCookie && BID.Profile.applyToUI) {
+          var cp = BID.Profile.loadFromCookie();
+          var hasAny = false;
+          for (var k in cp) { if (cp.hasOwnProperty(k) && cp[k]) { hasAny = true; break; } }
+          if (hasAny) {
+            BID.Profile.applyToUI(cp);
+            logInfo("cookie", "autofill OK");
+          } else {
+            logInfo("cookie", "autofill none");
+          }
         }
       } catch (e) {
         logInfo("cookie", "autofill FAILED " + msgOf(e));
       }
 
-      // [BID-10-03-11] Firebase匿名ログイン → bid/items 読込
+      // profileState 初期計算
+      refreshProfileState();
+      safeRenderAll("boot2");
+
+      // 匿名ログイン→読込
       BID.App.ensureSignedInThenLoad();
     },
 
     // =======================================================
-    // [BID-10-10] 匿名ログイン（可能なら）→ loadBidAndItems
+    // 匿名ログイン（可能なら）→ loadBidAndItems
     // =======================================================
     ensureSignedInThenLoad: function () {
       try {
-        if (!firebase || !firebase.auth) {
-          uiErr("Firebaseが初期化されていません（firebase-auth-compat.js を確認してください）。");
-          logInfo("boot", "FAILED: firebase.auth missing");
+        if (typeof firebase === "undefined" || !firebase.auth) {
+          uiErr("Firebaseが初期化されていません（firebase-auth-compat.js を確認）。");
+          logInfo("auth", "FAILED: firebase.auth missing");
           return;
         }
 
-        // 既にログイン済みならそのまま
         var cur = firebase.auth().currentUser;
         if (cur) {
-          logInfo("auth", "already signed in (uid=" + cur.uid + ")");
+          logInfo("auth", "already signed in uid=" + cur.uid);
           BID.App.loadBidAndItems();
           return;
         }
 
-        // 匿名ログインを試す
         logInfo("auth", "signInAnonymously ...");
         firebase.auth().signInAnonymously().then(function (cred) {
           var u = cred && cred.user ? cred.user : firebase.auth().currentUser;
-          logInfo("auth", "signInAnonymously OK uid=" + (u ? u.uid : "?") );
+          logInfo("auth", "signInAnonymously OK uid=" + (u ? u.uid : "?"));
           BID.App.loadBidAndItems();
         }).catch(function (e) {
-          // ルール/設定で匿名が無効の場合もある
           uiErr("ログインに失敗: " + msgOf(e));
           logInfo("auth", "signInAnonymously FAILED " + msgOf(e));
         });
       } catch (e) {
         uiErr("初期化エラー: " + msgOf(e));
-        logInfo("boot", "ERROR " + msgOf(e));
+        logInfo("auth", "ERROR " + msgOf(e));
       }
     },
 
     // =======================================================
-    // [BID-10-11] bid/items 読込
+    // bid/items 読込
     // =======================================================
     loadBidAndItems: function () {
       var st = BID.State.get();
@@ -244,6 +307,12 @@
       if (!bidNo) {
         uiErr("入札番号が未設定です。js/01_bidder_config.js の BID.CONFIG.BID_NO を設定してください。");
         logInfo("load", "FAILED: bidNo empty");
+        return;
+      }
+
+      if (!BID.DB || !BID.DB.getBid || !BID.DB.getItems) {
+        uiErr("内部エラー：DBモジュール未読込（04_bidder_db.js）。");
+        logInfo("load", "FAILED: DB module missing");
         return;
       }
 
@@ -259,88 +328,68 @@
 
         BID.State.setBid(bid);
 
-        // items
         logInfo("load", "items ...");
         return BID.DB.getItems(bidNo).then(function (items) {
           BID.State.setItems(items);
           BID.State.setLastLoadedAt(nowIso());
-          logInfo("load", "OK: status=" + (bid.status || "") + " items=" + items.length);
 
-          // 初回状態計算→描画
-          BID.App.refreshComputedStates();
+          logInfo("load", "OK status=" + (bid.status || "") + " items=" + items.length);
+
+          refreshProfileState();
           safeRenderAll("load");
 
-          // 状態メッセージ（最低1回は明示）
           uiOk("入札データを読み込みました。");
         });
       }).catch(function (e) {
         uiErr("読込エラー: " + msgOf(e));
-        logInfo("load", "ERROR " + msgOf(e));
+        logInfo("load", "FAILED " + msgOf(e));
       });
     },
 
     // =======================================================
-    // [BID-10-12] 計算状態（profileState等）を更新
-    // =======================================================
-    refreshComputedStates: function () {
-      try {
-        var p = BID.Profile.readFromInputs();
-        BID.State.setProfile(p);
-
-        var miss = BID.Profile.validateRequired(p);
-        BID.State.setProfileState(miss.length ? "INCOMPLETE" : "COMPLETE");
-
-        if (BID.Render && BID.Render.setProfileStatus) {
-          BID.Render.setProfileStatus(miss);
-        }
-      } catch (e) {
-        uiErr("状態更新エラー: " + msgOf(e));
-        logInfo("state", "ERROR " + msgOf(e));
-      }
-    },
-
-    // =======================================================
-    // [BID-10-13] 入力済データ読込（offers）
+    // 入力済データ（offers）読込
     // =======================================================
     loadOffer: function () {
       try {
         var st = BID.State.get();
-        var bidderId = (el("inpBidderId") && el("inpBidderId").value) ? String(el("inpBidderId").value).trim() : "";
-
-        logInfo("offer", "load clicked");
+        var bidderId = trim(el("inpBidderId") ? el("inpBidderId").value : "");
 
         if (!st.bidNo) {
-          uiErr("入札番号が未設定です。");
-          logInfo("offer", "FAILED: bidNo empty");
+          uiErr("入力済データを読み込めません：入札番号が未設定です。");
+          logInfo("offerLoad", "FAILED bidNo empty");
           return;
         }
         if (!bidderId) {
           uiErr("入力済データを読み込むには、入札者番号を入力してください。");
-          logInfo("offer", "FAILED: bidderId empty");
+          logInfo("offerLoad", "FAILED bidderId empty");
+          return;
+        }
+        if (!BID.DB || !BID.DB.getOffer) {
+          uiErr("内部エラー：DBモジュール未読込（04_bidder_db.js）。");
+          logInfo("offerLoad", "FAILED DB missing");
           return;
         }
 
         uiInfo("入力済データを読み込み中です。");
-        logInfo("offer", "getOffer bids/" + st.bidNo + "/offers/" + bidderId);
+        logInfo("offerLoad", "bids/" + st.bidNo + "/offers/" + bidderId);
 
         BID.DB.getOffer(st.bidNo, bidderId).then(function (offer) {
+          BID.State.setLastLoadedAt(nowIso());
+
           if (!offer) {
             BID.State.setOffer(null);
             BID.State.setOfferLines({});
-            BID.State.setLastLoadedAt(nowIso());
             uiOk("保存済データはありません。");
-            logInfo("offer", "none");
-            safeRenderAll("offer");
+            logInfo("offerLoad", "OK none");
+            safeRenderAll("offerLoad");
             return;
           }
 
-          // stateへ
+          // state
           BID.State.setOffer(offer);
           BID.State.setOfferLines(offer.lines || {});
-          BID.State.setLastLoadedAt(nowIso());
-          logInfo("offer", "loaded");
 
-          // profile反映（offer.profile優先、なければ直下キーの旧形式も拾う）
+          // profile: offer.profile優先（無ければ旧形式も拾う）
           var prof = offer.profile || {
             bidderId: offer.bidderId || bidderId,
             email: offer.email || "",
@@ -351,94 +400,105 @@
             contactInfo: offer.contactInfo || ""
           };
           prof.bidderId = bidderId;
-          BID.Profile.applyToInputs(prof);
+
+          try { if (BID.Profile && BID.Profile.applyToUI) BID.Profile.applyToUI(prof); } catch (e1) {}
           BID.State.setProfile(prof);
 
           // lines反映
-          if (BID.Offer && BID.Offer.applyLinesToTable) {
-            BID.Offer.applyLinesToTable(offer.lines || {});
-          }
+          try { if (BID.Offer && BID.Offer.applyLinesToTable) BID.Offer.applyLinesToTable(offer.lines || {}); } catch (e2) {}
 
-          // 状態更新・描画
-          BID.App.refreshComputedStates();
-          safeRenderAll("offer");
+          refreshProfileState();
+          safeRenderAll("offerLoad");
 
           uiOk("入力済データを読み込みました。");
-          logInfo("offer", "OK");
+          logInfo("offerLoad", "OK loaded");
         }).catch(function (e) {
           uiErr("入力済データ読込に失敗: " + msgOf(e));
-          logInfo("offer", "FAILED " + msgOf(e));
+          logInfo("offerLoad", "FAILED " + msgOf(e));
         });
       } catch (e) {
         uiErr("入力済データ読込エラー: " + msgOf(e));
-        logInfo("offer", "ERROR " + msgOf(e));
+        logInfo("offerLoad", "ERROR " + msgOf(e));
       }
     },
 
     // =======================================================
-    // [BID-10-14] 保存（open中は上書きOK）
+    // 保存（open中は上書きOK）
     // =======================================================
     submitOffer: function () {
       try {
         var st = BID.State.get();
-        logInfo("save", "clicked");
+
+        logInfo("save", "start");
 
         if (!st.bidNo) {
           uiErr("保存できません：入札番号が未設定です。");
-          logInfo("save", "FAILED: bidNo empty");
+          logInfo("save", "FAILED bidNo empty");
           return;
         }
         if (!st.bidStatus) {
           uiErr("保存できません：入札データが未読込です。");
-          logInfo("save", "FAILED: bid not loaded");
+          logInfo("save", "FAILED bid not loaded");
           return;
         }
         if (st.bidStatus !== "open") {
           uiErr("保存できません：入札が open ではありません（status=" + st.bidStatus + "）。");
-          logInfo("save", "FAILED: status=" + st.bidStatus);
+          logInfo("save", "FAILED status=" + st.bidStatus);
           return;
         }
         if (st.authState !== "UNLOCKED") {
           uiErr("保存できません：認証が必要です。");
-          logInfo("save", "FAILED: locked");
+          logInfo("save", "FAILED auth locked");
           return;
         }
 
-        BID.App.refreshComputedStates();
-        if (st.profileState !== "COMPLETE") {
+        refreshProfileState();
+        if (BID.State.get().profileState !== "COMPLETE") {
           uiErr("保存できません：入札者情報（必須）を入力してください。");
-          logInfo("save", "FAILED: profile incomplete");
+          logInfo("save", "FAILED profile incomplete");
           return;
         }
 
-        // payload生成（ここで必須/単価を検証してエラーを返す）
+        if (!BID.Offer || !BID.Offer.buildOfferPayload) {
+          uiErr("内部エラー：Offerモジュール未読込（07_bidder_offer.js）。");
+          logInfo("save", "FAILED Offer module missing");
+          return;
+        }
+
+        // payload生成（ここで単価未入力などの理由が出る）
         var payload = BID.Offer.buildOfferPayload();
         if (!payload) {
-          logInfo("save", "FAILED: payload invalid");
+          logInfo("save", "FAILED payload invalid (see msg)");
           return;
         }
 
-        // Cookie保存（必須OKなので保存）
+        // Cookie保存（profile）
         try {
-          BID.Profile.saveToCookie(payload.profile);
-          logInfo("cookie", "save OK");
-        } catch (e1) {
-          logInfo("cookie", "save FAILED " + msgOf(e1));
+          if (BID.Profile && BID.Profile.saveToCookie) {
+            BID.Profile.saveToCookie(payload.profile);
+            logInfo("cookie", "save OK");
+          }
+        } catch (e0) {
+          logInfo("cookie", "save FAILED " + msgOf(e0));
+        }
+
+        // 保存
+        if (!BID.DB || !BID.DB.upsertOffer) {
+          uiErr("内部エラー：DBモジュール未読込（04_bidder_db.js）。");
+          logInfo("save", "FAILED DB missing");
+          return;
         }
 
         uiInfo("保存中です...");
-        logInfo("save", "upsertOffer ...");
+        logInfo("save", "upsertOffer bids/" + st.bidNo + "/offers/" + payload.bidderId);
 
-        // bidderId（入札者番号）をドキュメントIDとして保存
-        var bidderId = payload.bidderId;
-
-        BID.DB.upsertOffer(st.bidNo, bidderId, payload, true).then(function (res) {
+        BID.DB.upsertOffer(st.bidNo, payload.bidderId, payload, true).then(function (res) {
           BID.State.setLastSavedAt(nowIso());
-          logInfo("save", "OK (exists=" + (res && res.exists ? "true" : "false") + ")");
           uiOk("保存しました。open中は何度でも修正できます。");
+          logInfo("save", "OK exists=" + ((res && res.exists) ? "true" : "false"));
 
-          // 念のため再読込して state を整合
-          return BID.DB.getOffer(st.bidNo, bidderId).then(function (offer) {
+          // 念のため再読込
+          return BID.DB.getOffer(st.bidNo, payload.bidderId).then(function (offer) {
             BID.State.setOffer(offer);
             BID.State.setOfferLines((offer && offer.lines) ? offer.lines : {});
             safeRenderAll("save");
@@ -447,6 +507,7 @@
           uiErr("保存に失敗: " + msgOf(e));
           logInfo("save", "FAILED " + msgOf(e));
         });
+
       } catch (e) {
         uiErr("保存エラー: " + msgOf(e));
         logInfo("save", "ERROR " + msgOf(e));
@@ -454,10 +515,9 @@
     }
   };
 
-  // =========================================================
-  // [BID-10-99] 起動
-  // =========================================================
+  // 起動
   document.addEventListener("DOMContentLoaded", function () {
     BID.App.boot();
   });
+
 })(window);
