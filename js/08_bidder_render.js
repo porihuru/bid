@@ -4,6 +4,9 @@
 //  - renderItems() で BID.Offer.applyLinesToTable が無い場合でも落ちない
 //  - applyMode() の末尾で submitStatus に判定結果を常時表示（理由が分かる）
 
+BID.Build && BID.Build.report && BID.Build.report("08_bidder_render.js", "v20260123-01");
+
+
 (function (global) {
   var BID = global.BID = global.BID || {};
 
