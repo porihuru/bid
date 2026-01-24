@@ -1,147 +1,321 @@
-/*
-[JST 2026-01-23 22:30] css/bidder.css v20260123-01
-Edge95想定：シンプルで崩れにくい
-*/
-:root{
-  --bg:#f5f6f8;
-  --card:#ffffff;
-  --bd:#d9dce1;
-  --text:#1f2328;
-  --muted:#667085;
-  --ok:#0f8a3b;
-  --err:#b42318;
-  --info:#175cd3;
-  --btn:#eef0f4;
-  --btnbd:#cfd4dc;
-}
+<!--
+[JST 2026-01-24 21:00]  bidder/index.html  v20260124-01
+入札者フォーム（単一入札専用 / bidNo固定 / 事前登録IDログイン → 入札認証）
 
-*{ box-sizing:border-box; }
-body{
-  margin:0;
-  background:var(--bg);
-  color:var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
-}
-.wrap{
-  max-width: 980px;
-  margin: 12px auto;
-  padding: 0 10px 30px;
-}
+[最新要件]
+  - 匿名ログインはしない
+  - Firebase Authentication に事前登録した「入札者ID＋パスワード」でログイン
+    * 入札者番号＝入札者ID（同一）
+    * ただし Firebase Email/Password の都合上、内部では「入札者ID + EMAIL_SUFFIX」をメールとして扱う
+  - ログイン後に「入札認証（備考5）」を実施（現行のまま）
+  - 認証メッセージは「認証コードを入力してください。」に統一
+  - 「数量」表記は「予定数量」
+  - 合計金額は表示しない
+  - closed後は完全閲覧モード（入力不可・保存不可）
+  - 品名/規格は1セル2段表示
+  - 入力済データの読み込み / 印刷 / PDF出力 / Cookie削除ボタン
+  - 入札者情報（6項目）は認証後必須、Cookie保存して次回自動入力
+  - すべてのボタン押下後に成功/失敗/理由を必ず表示（ログ＋画面）
+  - JSは機能別分割＆先頭に番号＆起動時にバージョンをログ出力（00_bidder_build.js）
+  - Firebase compat + initializeApp はこのHTMLで実施（Edge95想定）
+-->
+<!doctype html>
+<html lang="ja">
+<head>
+  <!-- [H-01] 基本メタ -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>入札フォーム（入札者）</title>
 
-.card{
-  background:var(--card);
-  border:1px solid var(--bd);
-  border-radius:12px;
-  padding:12px;
-  margin-top:10px;
-}
+  <!-- [H-02] CSS -->
+  <link rel="stylesheet" href="css/bidder.css" />
+</head>
 
-.row{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-}
+<body>
+  <div id="appRoot" class="wrap">
 
-.k{ font-weight:700; }
-.muted{ color:var(--muted); font-size:0.92em; }
+    <!-- [B-02] ヘッダー -->
+    <div class="row" style="justify-content:space-between;">
+      <div id="appTitle" class="k" style="font-size:1.2em;">入札フォーム（入札者）</div>
+      <div class="muted">
+        <span id="appVersion">v20260124-01</span>
+      </div>
+    </div>
 
-.field{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-input{
-  padding:10px 10px;
-  border:1px solid var(--bd);
-  border-radius:10px;
-  font-size:16px;
-  outline:none;
-}
-input:disabled{
-  background:#f1f2f4;
-  color:#777;
-}
+    <!-- [B-10] ステータスバー（常時表示） -->
+    <div id="statusBar" class="card">
+      <div class="row">
+        <div><span class="k">入札番号:</span> <span id="sbBidNo">(未設定)</span></div>
+        <div><span class="k">状態:</span> <span id="sbBidStatus">(未読込)</span></div>
+        <div><span class="k">ログイン:</span> <span id="sbLoginState">SIGNED-OUT</span></div>
+        <div><span class="k">入札者ID:</span> <span id="sbBidderId">-</span></div>
+        <div><span class="k">認証:</span> <span id="sbAuthState">LOCKED</span></div>
+        <div><span class="k">入力:</span> <span id="sbInputState">不可</span></div>
+        <div><span class="k">モード:</span> <span id="sbMode">-</span></div>
+      </div>
+      <div class="row muted" style="margin-top:6px;">
+        <div>最終読込: <span id="sbLastLoaded">-</span></div>
+        <div>最終保存: <span id="sbLastSaved">-</span></div>
+      </div>
+    </div>
 
-.btn{
-  padding:10px 12px;
-  background:var(--btn);
-  border:1px solid var(--btnbd);
-  border-radius:10px;
-  cursor:pointer;
-  font-size:16px;
-}
-.btn:disabled{
-  opacity:0.55;
-  cursor:not-allowed;
-}
-.btn.primary{
-  background:#e7f0ff;
-  border-color:#b6d2ff;
-}
+    <!-- [B-20] 操作ボタンバー（常時表示） -->
+    <div id="toolbar" class="card">
+      <div class="row">
+        <button id="btnLoadOffer" class="btn" type="button">入力済データの読み込み</button>
+        <button id="btnPrint" class="btn" type="button">印刷</button>
+        <button id="btnPdf" class="btn" type="button">PDF出力</button>
+        <button id="btnCookieClear" class="btn" type="button">Cookie削除</button>
+      </div>
+      <div id="toolbarNote" class="muted" style="margin-top:6px;">
+        open中は何度でも上書き保存できます。closed後は閲覧のみです。
+      </div>
+      <div id="submitStatus" class="muted" style="margin-top:6px;"></div>
+    </div>
 
-.msg{
-  padding:10px;
-  border-radius:10px;
-  border:1px solid var(--bd);
-  background:#fafafa;
-}
-.msg.ok{
-  border-color:#b7e4c7;
-  background:#ecfff3;
-  color:var(--ok);
-}
-.msg.err{
-  border-color:#f4b4ae;
-  background:#fff1f0;
-  color:var(--err);
-}
-.msg.info{
-  border-color:#c7d7ff;
-  background:#eef4ff;
-  color:#0b3aa5;
-}
+    <!-- [B-30] メッセージ領域（常時表示） -->
+    <div id="msgArea" class="card">
+      <div id="msgError" class="msg err" style="display:none;"></div>
+      <div id="msgInfo" class="msg info">認証コードを入力してください。</div>
+      <div id="msgOk" class="msg ok" style="display:none;"></div>
+    </div>
 
-#itemsTableWrap{ overflow:auto; }
-table{
-  width:100%;
-  border-collapse:collapse;
-  min-width:780px;
-}
-th,td{
-  border:1px solid var(--bd);
-  padding:8px;
-  vertical-align:top;
-  font-size:14px;
-}
-th{ background:#f2f4f7; text-align:left; }
-.itemName{ font-weight:700; }
-.itemSpec{ color:var(--muted); margin-top:4px; }
-.priceInput{ width:120px; }
+    <!-- [B-35] ログイン（Firebase Auth） -->
+    <div id="loginSection" class="card">
+      <div class="k">入札者ログイン</div>
+      <div class="muted" style="margin:6px 0 10px;">
+        入札者IDとパスワードを入力してください。（事前登録されたIDのみログインできます）
+      </div>
 
-#logBox{
-  border:1px solid var(--bd);
-  border-radius:10px;
-  padding:8px;
-  min-height:90px;
-  max-height:240px;
-  overflow:auto;
-  background:#fcfcfd;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size:12px;
-  white-space:pre-wrap;
-}
+      <div class="row">
+        <div class="field" style="min-width:240px;">
+          <label for="loginBidderId" class="muted">入札者ID</label>
+          <input id="loginBidderId" type="text" inputmode="text" autocomplete="username" placeholder="例: 332b001" />
+        </div>
+        <div class="field" style="min-width:240px;">
+          <label for="loginPassword" class="muted">パスワード</label>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="例: 123456" />
+        </div>
+        <button id="btnLogin" class="btn" type="button">ログイン</button>
+        <button id="btnLogout" class="btn" type="button">ログアウト</button>
+      </div>
 
-/* 印刷 */
-@media print{
-  body{ background:#fff; }
-  .wrap{ max-width:none; margin:0; padding:0; }
-  #toolbar, #logSection, #msgArea, #loginSection, #authSection, #profileSection, #submitSection, #itemsSection, #bidInfoSection, #statusBar{
-    display:none !important;
-  }
-  #printArea{
-    display:block !important;
-    border:none !important;
-    margin-top:0;
-  }
-}
+      <div id="loginResult" class="muted" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- [B-40] 入札認証（備考5） -->
+    <div id="authSection" class="card">
+      <div class="k">入札認証</div>
+      <div class="muted" id="authHint" style="margin:6px 0 10px;">
+        認証コードを入力してください。
+      </div>
+
+      <div class="row">
+        <div class="field" style="min-width:260px;">
+          <label for="authCode" class="muted">認証コード</label>
+          <input id="authCode" type="password" inputmode="text" autocomplete="off" />
+        </div>
+        <button id="btnAuth" class="btn" type="button">認証</button>
+      </div>
+
+      <div id="authResult" class="muted" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- [B-50] 入札者情報（認証後に必須・Cookie） -->
+    <div id="profileSection" class="card">
+      <div class="k">入札者情報（必須）</div>
+      <div class="muted" style="margin:6px 0 10px;">
+        この情報はCookieに保存され、次回自動入力されます。
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="inpEmail" class="muted">メールアドレス *</label>
+          <input id="inpEmail" type="email" autocomplete="email" />
+        </div>
+        <div class="field" style="min-width:360px;">
+          <label for="inpAddress" class="muted">住所 *</label>
+          <input id="inpAddress" type="text" autocomplete="street-address" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="inpCompanyName" class="muted">会社名 *</label>
+          <input id="inpCompanyName" type="text" autocomplete="organization" />
+        </div>
+        <div class="field">
+          <label for="inpRepresentativeName" class="muted">代表者名 *</label>
+          <input id="inpRepresentativeName" type="text" autocomplete="name" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="inpContactName" class="muted">担当者名 *</label>
+          <input id="inpContactName" type="text" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="inpContactInfo" class="muted">担当者・連絡先 *</label>
+          <input id="inpContactInfo" type="text" autocomplete="tel" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div id="profileStatus" class="muted"></div>
+        <div id="profileAutoFillNote" class="muted"></div>
+      </div>
+    </div>
+
+    <!-- [B-60] 入札概要（ヘッダー表示：備考5は非表示） -->
+    <div id="bidInfoSection" class="card">
+      <div class="k">入札概要</div>
+
+      <div style="margin-top:8px;">
+        <div><span class="k">宛先1:</span> <span id="txtTo1"></span></div>
+        <div><span class="k">宛先2:</span> <span id="txtTo2"></span></div>
+        <div><span class="k">宛先3:</span> <span id="txtTo3"></span></div>
+        <div><span class="k">納入場所:</span> <span id="txtDeliveryPlace"></span></div>
+        <div><span class="k">納期:</span> <span id="txtDueDate"></span></div>
+        <div><span class="k">入札年月日:</span> <span id="txtBidDate"></span></div>
+      </div>
+
+      <div style="margin-top:8px;">
+        <div class="k">備考（公開）</div>
+        <div class="muted">※備考5は表示しません（認証用）</div>
+        <div>備考1: <span id="txtNote1"></span></div>
+        <div>備考2: <span id="txtNote2"></span></div>
+        <div>備考3: <span id="txtNote3"></span></div>
+        <div>備考4: <span id="txtNote4"></span></div>
+      </div>
+    </div>
+
+    <!-- [B-70] 品目一覧（2段表示／予定数量／合計なし） -->
+    <div id="itemsSection" class="card">
+      <div class="k">品目一覧</div>
+      <div class="muted" style="margin:6px 0 10px;">
+        品名・規格は2段表示です。合計金額は表示しません。
+      </div>
+
+      <div id="itemsEmpty" class="muted" style="display:none;">品目がありません。</div>
+
+      <div id="itemsTableWrap">
+        <table id="itemsTable">
+          <thead>
+            <tr>
+              <th style="width:60px;">seq</th>
+              <th style="width:60px;">見本</th>
+              <th>品名／規格（2段）</th>
+              <th style="width:110px;">予定数量</th>
+              <th style="width:70px;">単位</th>
+              <th style="width:180px;">備考</th>
+              <th style="width:140px;">入札単価</th>
+            </tr>
+          </thead>
+          <tbody id="itemsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- [B-80] 保存（提出：open中のみ、上書き可） -->
+    <div id="submitSection" class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <button id="btnSubmit" class="btn" type="button">入札を保存（提出）</button>
+          <span class="muted" style="margin-left:8px;">
+            open ＆ ログインOK ＆ 認証OK ＆ 入札者情報OK のとき保存できます（open中は上書き可）。
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- [B-90] 印刷用エリア（印刷時のみ表示：レイアウトは作りながら整える） -->
+    <div id="printArea" class="card" style="display:none;">
+      <div class="k">入札控え</div>
+      <div class="muted">出力日時: <span id="printDatetime">-</span></div>
+      <div class="muted">※合計金額は表示しません。</div>
+
+      <div style="margin-top:10px;">
+        <div class="k">入札番号</div>
+        <div id="printBidNo">-</div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="k">入札者情報</div>
+        <div id="printProfile">-</div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="k">入札概要</div>
+        <div id="printBidInfo">-</div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="k">品目一覧</div>
+        <div id="printItems">-</div>
+      </div>
+
+      <div class="muted" style="margin-top:12px;">
+        本書は電子的に入力された入札内容の控えです。
+      </div>
+    </div>
+
+    <!-- [B-99] ログ -->
+    <div id="logSection" class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="k">ログ</div>
+        <div>
+          <button id="btnLogClear" class="btn" type="button">ログクリア</button>
+        </div>
+      </div>
+      <div id="logBox"></div>
+      <div id="logFooter" class="muted" style="margin-top:6px;"></div>
+    </div>
+
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- [FB-01] Firebase (compat) : Edge95想定 -->
+  <!-- ========================================================= -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- [FB-02] Firebase initialize : あなたが提示した firebaseConfig -->
+  <!-- ========================================================= -->
+  <script>
+    // [FB-02-01] 設定
+    var firebaseConfig = {
+      apiKey: "AIzaSyAAinuBPDNjxQ63TEgDnRjP2pfWIXRBrQ0",
+      authDomain: "bidding-920b8.firebaseapp.com",
+      projectId: "bidding-920b8",
+      storageBucket: "bidding-920b8.firebasestorage.app",
+      messagingSenderId: "554171859200",
+      appId: "1:554171859200:web:1b1412a6a8c57fc9a4f3e5",
+      measurementId: "G-HC01P1974L"
+    };
+
+    // [FB-02-02] 二重初期化防止
+    if (!firebase.apps || !firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+  </script>
+
+  <!-- ========================================================= -->
+  <!-- [JS-LOAD] bidder用 JS（番号順） -->
+  <!-- ========================================================= -->
+  <script src="js/00_bidder_build.js"></script>
+  <script src="js/01_bidder_config.js"></script>
+  <script src="js/02_bidder_state.js"></script>
+  <script src="js/03_bidder_log.js"></script>
+  <script src="js/04_bidder_db.js"></script>
+  <script src="js/05_bidder_auth.js"></script>
+  <script src="js/06_bidder_profile.js"></script>
+  <script src="js/07_bidder_offer.js"></script>
+  <script src="js/08_bidder_render.js"></script>
+  <script src="js/09_bidder_print.js"></script>
+  <script src="js/10_bidder_app.js"></script>
+</body>
+</html>
