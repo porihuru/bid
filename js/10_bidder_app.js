@@ -3,7 +3,7 @@
   "use strict";
 
   var FILE = "10_bidder_app.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260124-011";
   var TS   = new Date().toISOString();
 
   // =========================================================
