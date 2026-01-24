@@ -1,225 +1,234 @@
 <!--
-[JST 2026-01-24 21:00]  index.html v20260124-01
-入札者フォーム（個別JS読込運用）
-  - Firebase Auth: 入札者ID + パスワード（匿名ログインなし）
-  - 入札認証（コード）は従来どおり（authCode）
-  - 00_bidder_build.js を復活（ビルドではなく起動前共通初期化用途）
-  - 各JS冒頭で [ver] をログ出力
-  - Edge95/IEモード想定: ES5記法
+[JST 2026-01-24 21:30]  index.html v20260124-02
+入札フォーム（入札者）/ 個別JS読み込み運用
+目的:
+  - iPhoneでもログをコピーできる（ログ停止/コピー）
+  - 個別JS(01-10)を順に読み込み
 -->
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>入札者フォーム</title>
+  <title>入札フォーム（入札者）</title>
   <style>
-    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;margin:0;background:#f6f7fb;color:#111;}
-    header{padding:10px 12px;background:#111;color:#fff;}
-    header .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;}
-    header .meta{font-size:12px;opacity:.9}
-    main{padding:12px;max-width:980px;margin:0 auto;}
-    .card{background:#fff;border:1px solid #e5e7ee;border-radius:10px;padding:12px;margin:10px 0;}
-    .grid{display:grid;grid-template-columns:1fr;gap:10px;}
-    @media(min-width:720px){ .grid2{grid-template-columns:1fr 1fr;} }
-    label{display:block;font-size:12px;color:#333;margin:0 0 4px;}
-    input,select,button,textarea{font:inherit;}
-    input,select{width:100%;padding:10px;border:1px solid #cfd3df;border-radius:8px;}
-    button{padding:10px 12px;border:1px solid #cfd3df;border-radius:8px;background:#fff;cursor:pointer;}
-    button.primary{background:#111;color:#fff;border-color:#111;}
-    button.danger{background:#fff;color:#b00020;border-color:#b00020;}
-    button:disabled{opacity:.5;cursor:not-allowed;}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-    .hint{font-size:12px;color:#666}
-    .status{font-size:12px;padding:6px 8px;border-radius:999px;background:#eef0f7;color:#333;display:inline-block;}
-    table{width:100%;border-collapse:collapse;}
-    th,td{border-bottom:1px solid #e8eaf2;padding:8px;font-size:14px;vertical-align:top;}
-    th{background:#fafbff;text-align:left;}
-    td.num{white-space:nowrap;text-align:right;}
-    .logbox{width:100%;height:260px;padding:10px;border:1px solid #cfd3df;border-radius:8px;background:#0b0f1a;color:#e7e9f3;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-    .muted{color:#777;}
-    .sep{height:1px;background:#e5e7ee;margin:10px 0;}
-    .small{font-size:12px;}
-    .warn{color:#b00020;}
-    /* 印刷 */
-    @media print{
-      header, .no-print { display:none !important; }
-      body{background:#fff;}
-      .card{border:0;}
-      .logbox{display:none;}
+    :root{
+      --bg:#f6f7fb;
+      --card:#ffffff;
+      --border:#e5e7eb;
+      --text:#111827;
+      --muted:#6b7280;
+      --danger:#b91c1c;
+      --ok:#047857;
+      --btn:#111827;
+      --btnText:#ffffff;
+      --btn2:#e5e7eb;
+      --btn2Text:#111827;
     }
+    body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; }
+    .wrap{ max-width:980px; margin:0 auto; padding:14px; }
+    .topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .title{ font-size:20px; font-weight:700; }
+    .ver{ font-size:12px; color:var(--muted); }
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; margin-top:10px; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; }
+    .col{ flex:1; min-width:260px; }
+    .kvs{ font-size:14px; line-height:1.6; color:var(--text); }
+    .kvs .m{ color:var(--muted); }
+    .btnRow{ display:flex; gap:8px; flex-wrap:wrap; }
+    button{
+      border:0; border-radius:10px; padding:10px 12px; font-size:14px;
+      background:var(--btn); color:var(--btnText); cursor:pointer;
+    }
+    button.secondary{ background:var(--btn2); color:var(--btn2Text); }
+    button.danger{ background:#ef4444; color:#fff; }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
+    input, textarea{
+      width:100%; box-sizing:border-box;
+      border:1px solid var(--border); border-radius:10px;
+      padding:10px 10px; font-size:14px; background:#fff;
+    }
+    label{ display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+    .hint{ font-size:12px; color:var(--muted); }
+    .err{ border:1px solid #fecaca; background:#fff1f2; color:var(--danger); padding:10px; border-radius:10px; }
+    .ok{ border:1px solid #a7f3d0; background:#ecfdf5; color:var(--ok); padding:10px; border-radius:10px; }
+    table{ width:100%; border-collapse:collapse; }
+    th, td{ border-bottom:1px solid var(--border); padding:10px 6px; font-size:14px; vertical-align:top; }
+    th{ text-align:left; color:var(--muted); font-weight:600; }
+    .td2line{ line-height:1.35; }
+    .td2line .sub{ color:var(--muted); font-size:12px; margin-top:4px; display:block; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .footer{ margin-top:10px; font-size:12px; color:var(--muted); }
+    .small{ font-size:12px; color:var(--muted); }
   </style>
-
-  <!-- Firebase (compat) ※必要に応じてローカル配置へ置換してください -->
-  <!--
-    [CFG] ここは環境に合わせて差し替え
-    - compat版（firebase-app-compat / firebase-auth-compat / firebase-firestore-compat）
-  -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
-  <!-- 個別JS（ビルド不要運用） -->
-  <script src="./js/00_bidder_build.js"></script>
-  <script src="./js/01_bidder_config.js"></script>
-  <script src="./js/02_bidder_state.js"></script>
-  <script src="./js/03_bidder_log.js"></script>
-  <script src="./js/04_bidder_db.js"></script>
-  <script src="./js/05_bidder_auth.js"></script>
-  <script src="./js/06_bidder_profile.js"></script>
-  <script src="./js/07_bidder_offer.js"></script>
-  <script src="./js/08_bidder_render.js"></script>
-  <script src="./js/09_bidder_print.js"></script>
-  <script src="./js/10_bidder_app.js"></script>
 </head>
 
 <body>
-<header>
-  <div class="row">
-    <div>
-      <div><strong>入札者フォーム</strong></div>
-      <div class="meta" id="hdrMeta">BID_NO=(none)</div>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">入札フォーム（入札者）</div>
+      <div class="ver mono" id="lblPageVer">v20260124-02</div>
     </div>
-    <div class="row">
-      <span class="status" id="hdrMode">mode: -</span>
-      <button class="no-print" id="btnReload">再読込</button>
-      <button class="no-print" id="btnPrint">印刷</button>
+
+    <!-- 状態表示 -->
+    <div class="card">
+      <div class="kvs">
+        <div><span class="m">入札番号:</span> <span id="lblBidNo">-</span>
+          <span class="m" style="margin-left:10px;">状態:</span> <span id="lblBidStatus">-</span>
+          <span class="m" style="margin-left:10px;">認証:</span> <span id="lblAuthState">LOCKED</span>
+        </div>
+        <div><span class="m">入力:</span> <span id="lblInputEnabled">不可</span>
+          <span class="m" style="margin-left:10px;">モード:</span> <span id="lblViewOnly">EDIT</span>
+        </div>
+        <div class="small">
+          <span class="m">最終読込:</span> <span id="lblLastLoadedAt">-</span>
+          <span class="m" style="margin-left:10px;">最終保存:</span> <span id="lblLastSavedAt">-</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作ボタン -->
+    <div class="card">
+      <div class="btnRow">
+        <button id="btnLoad" type="button" class="secondary">再読込</button>
+        <button id="btnProfileLoad" type="button" class="secondary">入力済データの読み込み</button>
+        <button id="btnPrint" type="button" class="secondary">印刷</button>
+        <button id="btnPdf" type="button" class="secondary">PDF出力</button>
+        <button id="btnCookieClear" type="button" class="secondary">Cookie削除</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        open中は何度でも上書き保存できます。closed後は閲覧のみです。
+      </div>
+    </div>
+
+    <!-- ログイン -->
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <div class="hint">1) 入札者IDとパスワードでログイン（匿名ログインなし）</div>
+          <label>入札者ID（例: 332b001）</label>
+          <input id="txtBidderId" type="text" autocomplete="username" inputmode="latin" />
+          <label>パスワード（例: 123456）</label>
+          <input id="txtBidderPass" type="password" autocomplete="current-password" inputmode="latin" />
+          <div class="btnRow" style="margin-top:10px;">
+            <button id="btnLogin" type="button">ログイン</button>
+            <button id="btnLogout" type="button" class="secondary">ログアウト</button>
+          </div>
+          <div class="hint" style="margin-top:8px;">
+            入札者番号＝入札者ID（同一）として扱います。Firebaseに事前登録したアカウントのみ利用できます。
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="hint">2) 入札認証（備考5コード）は今のまま</div>
+          <label>認証コード（備考5）</label>
+          <input id="txtAuthCode" type="text" inputmode="latin" />
+          <div class="btnRow" style="margin-top:10px;">
+            <button id="btnAuth" type="button">入札認証</button>
+          </div>
+          <div class="hint" style="margin-top:8px;">
+            認証メッセージは「認証コードを入力してください。」に統一。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- プロフィール -->
+    <div class="card">
+      <div class="hint">3) 入札者情報（必須）</div>
+      <div class="row">
+        <div class="col">
+          <label>メールアドレス</label>
+          <input id="txtEmail" type="email" autocomplete="email" />
+          <label>住所</label>
+          <input id="txtAddress" type="text" autocomplete="street-address" />
+          <label>会社名</label>
+          <input id="txtCompanyName" type="text" autocomplete="organization" />
+        </div>
+        <div class="col">
+          <label>代表者名</label>
+          <input id="txtRepresentativeName" type="text" />
+          <label>担当者名</label>
+          <input id="txtContactName" type="text" />
+          <label>担当者連絡先</label>
+          <input id="txtContactInfo" type="text" />
+        </div>
+      </div>
+
+      <div class="btnRow" style="margin-top:10px;">
+        <button id="btnSaveProfile" type="button" class="secondary">プロフィール保存（Cookie）</button>
+      </div>
+    </div>
+
+    <!-- 品目（単価入力） -->
+    <div class="card">
+      <div class="hint">4) 品目（単価入力） 「品名＋規格」は1セル2段表示。合計金額は表示しません。</div>
+      <div style="overflow:auto; margin-top:8px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:70px;">番号</th>
+              <th>品名／規格</th>
+              <th style="width:120px;">予定数量</th>
+              <th style="width:140px;">入札単価</th>
+              <th style="width:140px;">備考</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyItems">
+            <tr><td colspan="5" class="m">品目なし</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="btnRow" style="margin-top:10px;">
+        <button id="btnSaveOffer" type="button">入札を保存</button>
+      </div>
+    </div>
+
+    <!-- メッセージ（成功/失敗/理由） -->
+    <div class="card" id="msgBox" style="display:none;"></div>
+
+    <!-- ログ -->
+    <div class="card">
+      <div class="row" style="align-items:center; justify-content:space-between;">
+        <div class="hint"><b>ログ</b>　各ボタン押下後に成功/失敗/理由を必ず表示します。</div>
+        <div class="btnRow">
+          <button id="btnLogClear" type="button" class="secondary">ログクリア</button>
+          <button id="btnLogPause" type="button" class="secondary">ログ停止</button>
+          <button id="btnLogCopy" type="button" class="secondary">ログコピー</button>
+        </div>
+      </div>
+      <textarea id="txtLog" class="mono" readonly style="margin-top:8px;height:220px;"></textarea>
+      <div class="hint" style="margin-top:6px;">
+        ログ欄をタップすると自動でログ停止（選択/コピーを邪魔しません）。コピーは「ログコピー」を推奨。
+      </div>
+    </div>
+
+    <!-- バージョン一覧 -->
+    <div class="footer">
+      <div><b>JSバージョン</b></div>
+      <pre id="preVerList" class="mono" style="white-space:pre-wrap;margin:6px 0 0 0;"></pre>
     </div>
   </div>
-</header>
 
-<main>
+  <!-- Firebase（必要なら使用：既存構成に合わせて下さい） -->
+  <!-- 既に00_bidder_build.js等で読み込んでいるなら、重複読み込みは避けてください -->
+  <!--
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  -->
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div class="small muted">入札番号</div>
-        <div id="bidNoView" style="font-weight:700;">(none)</div>
-      </div>
-      <div class="row no-print">
-        <button id="btnLogClear">ログクリア</button>
-      </div>
-    </div>
-    <div class="sep"></div>
-    <div class="hint">
-      進行: 「ログイン（入札者ID/パスワード）」→「入札認証（コード）」→「入札者情報入力」→「保存」
-    </div>
-  </div>
-
-  <!-- ログイン -->
-  <div class="card no-print">
-    <div style="font-weight:700;margin-bottom:6px;">1) ログイン（Firebase認証）</div>
-    <div class="grid grid2">
-      <div>
-        <label>入札者ID（例: 332b001）</label>
-        <input id="inpBidderId" placeholder="332b001" autocomplete="username" />
-      </div>
-      <div>
-        <label>パスワード（例: 123456）</label>
-        <input id="inpPassword" placeholder="******" type="password" autocomplete="current-password" />
-      </div>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <button class="primary" id="btnLogin">ログイン</button>
-      <button id="btnLogout">ログアウト</button>
-      <span class="hint" id="loginHint"></span>
-    </div>
-  </div>
-
-  <!-- 入札認証 -->
-  <div class="card no-print">
-    <div style="font-weight:700;margin-bottom:6px;">2) 入札認証（従来どおり）</div>
-    <div class="grid grid2">
-      <div>
-        <label>認証コード（備考5）</label>
-        <input id="inpAuthCode" placeholder="認証コードを入力してください。" />
-        <div class="hint">認証成功後に入力が可能になります。</div>
-      </div>
-      <div>
-        <label>&nbsp;</label>
-        <button class="primary" id="btnAuth">認証</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 入札者情報 -->
-  <div class="card">
-    <div style="font-weight:700;margin-bottom:6px;">3) 入札者情報（必須）</div>
-
-    <div class="grid grid2">
-      <div>
-        <label>メールアドレス</label>
-        <input id="pEmail" placeholder="example@example.com" />
-      </div>
-      <div>
-        <label>住所</label>
-        <input id="pAddress" placeholder="札幌市..." />
-      </div>
-      <div>
-        <label>会社名</label>
-        <input id="pCompany" placeholder="〇〇株式会社" />
-      </div>
-      <div>
-        <label>代表者名</label>
-        <input id="pRep" placeholder="代表者名" />
-      </div>
-      <div>
-        <label>担当者名</label>
-        <input id="pPerson" placeholder="担当者名" />
-      </div>
-      <div>
-        <label>担当者連絡先</label>
-        <input id="pTel" placeholder="090-..." />
-      </div>
-    </div>
-
-    <div class="row no-print" style="margin-top:10px;">
-      <button id="btnLoadCookie">入力済データの読み込み</button>
-      <button id="btnSaveCookie">入力済データを保存</button>
-      <button class="danger" id="btnDelCookie">クッキー削除</button>
-      <span class="hint" id="cookieHint"></span>
-    </div>
-  </div>
-
-  <!-- 品目 -->
-  <div class="card">
-    <div style="font-weight:700;margin-bottom:6px;">4) 品目（単価入力）</div>
-    <div class="hint">「品名＋規格」は1セル2段表示。合計金額は表示しません。</div>
-    <div class="sep"></div>
-    <div style="overflow:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:70px;">番号</th>
-            <th>品名 / 規格</th>
-            <th style="width:120px;">予定数量</th>
-            <th style="width:140px;">入札単価</th>
-            <th style="width:140px;">備考</th>
-          </tr>
-        </thead>
-        <tbody id="tbodyItems">
-          <tr><td colspan="5" class="muted">読み込み中...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="row no-print" style="margin-top:10px;">
-      <button class="primary" id="btnSaveOffer">入札を保存</button>
-      <span class="hint" id="saveHint"></span>
-    </div>
-    <div class="hint warn" id="saveWarn" style="margin-top:6px;"></div>
-  </div>
-
-  <!-- ログ -->
-  <div class="card no-print">
-    <div class="row" style="justify-content:space-between;">
-      <div style="font-weight:700;">ログ</div>
-      <div class="hint">各ボタン押下後に成功/失敗/理由を必ず表示します。</div>
-    </div>
-    <div class="sep"></div>
-    <textarea id="txtLog" class="logbox" readonly></textarea>
-  </div>
-
-</main>
+  <!-- 個別JS（01→10の順） -->
+  <script src="js/01_bidder_config.js"></script>
+  <script src="js/02_bidder_state.js"></script>
+  <script src="js/03_bidder_log.js"></script>
+  <script src="js/04_bidder_db.js"></script>
+  <script src="js/05_bidder_auth.js"></script>
+  <script src="js/06_bidder_profile.js"></script>
+  <script src="js/07_bidder_offer.js"></script>
+  <script src="js/08_bidder_render.js"></script>
+  <script src="js/09_bidder_print.js"></script>
+  <script src="js/10_bidder_app.js"></script>
 </body>
 </html>
