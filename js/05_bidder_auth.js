@@ -1,33 +1,107 @@
-/* [JST 2026-01-24 21:00]  05_bidder_auth.js v20260124-01 */
+/* [JST 2026-01-24 21:40]  05_bidder_auth.js v20260124-02
+   変更点:
+   - [AUTH-04] 10_bidder_app.js 側が呼ぶ unlockByCode() を追加（bidAuthの別名）
+   - [AUTH-03] watchAuthState() で loginState を可能な範囲で更新（setLoginState / set / get がある場合に対応）
+   - firebase 未初期化時に分かるログを追加
+   - エラーメッセージを要件に合わせて一部統一（空入力:「認証コードを入力してください。」）
+*/
 (function(){
   var FILE = "05_bidder_auth.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260124-02";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
     if(window.BidderLog && window.BidderLog.write) window.BidderLog.write(tag, msg);
-    else if(window.log) window.log(tag, msg);
     else try{ console.log("[" + tag + "] " + msg); }catch(e){}
   }
+
   if(!window.__APP_VER__){ window.__APP_VER__ = []; }
   window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
   L("ver", TS + " " + FILE + " " + VER);
 
-  function bidderIdToEmail(bidderId){
-    return bidderId + window.BidderConfig.BIDDER_EMAIL_DOMAIN;
+  // =========================================================
+  // 内部ユーティリティ
+  // =========================================================
+  function ensureFirebaseAuth(){
+    if(!window.firebase || !firebase.auth){
+      L("auth", "ERROR firebase/auth not initialized. (firebase or firebase.auth missing)");
+      throw new Error("Firebase Auth が初期化されていません。");
+    }
+    return firebase.auth();
   }
 
-  function signIn(bidderId, password){
-    // [AUTH-01] 入札者ID+PW -> Email/PW に変換してログイン
-    var email = bidderIdToEmail(bidderId);
-    L("auth", "signInWithEmailAndPassword ... bidderId=" + bidderId);
+  function safeCall(obj, fnName /*, args... */){
+    try{
+      if(obj && typeof obj[fnName] === "function"){
+        return obj[fnName].apply(obj, Array.prototype.slice.call(arguments, 2));
+      }
+    }catch(e){
+      L("auth", "safeCall FAILED " + fnName + " " + (e && e.message ? e.message : e));
+    }
+    return undefined;
+  }
 
-    return firebase.auth().signInWithEmailAndPassword(email, password)
+  function setLoginState(stateStr){
+    // BidderState 実装差異に対応
+    // 優先: setLoginState -> set("loginState", ...) -> 何もしない
+    if(window.BidderState){
+      if(typeof window.BidderState.setLoginState === "function"){
+        window.BidderState.setLoginState(stateStr);
+        return;
+      }
+      if(typeof window.BidderState.set === "function"){
+        window.BidderState.set("loginState", stateStr);
+        return;
+      }
+      // get() が返すオブジェクトを直接触れる設計でない可能性があるので、ここでは触らない
+    }
+  }
+
+  function getLoginState(){
+    try{
+      if(window.BidderState){
+        if(typeof window.BidderState.get === "function"){
+          var st = window.BidderState.get();
+          return st && st.loginState ? st.loginState : "";
+        }
+        if(typeof window.BidderState.getState === "function"){
+          var st2 = window.BidderState.getState();
+          return st2 && st2.loginState ? st2.loginState : "";
+        }
+      }
+    }catch(e){}
+    return "";
+  }
+
+  // bidderId -> email 変換
+  function bidderIdToEmail(bidderId){
+    // BidderConfig.BIDDER_EMAIL_DOMAIN が "@bid.local" のように先頭@込み想定
+    var dom = (window.BidderConfig && window.BidderConfig.BIDDER_EMAIL_DOMAIN) ? window.BidderConfig.BIDDER_EMAIL_DOMAIN : "@bid.local";
+    return bidderId + dom;
+  }
+
+  // =========================================================
+  // [AUTH-01] ログイン
+  // =========================================================
+  function signIn(bidderId, password){
+    var auth = ensureFirebaseAuth();
+
+    var email = bidderIdToEmail(bidderId);
+    L("auth", "signInWithEmailAndPassword ... bidderId=" + bidderId + " email=" + email);
+
+    return auth.signInWithEmailAndPassword(email, password)
       .then(function(cred){
         var u = cred.user;
-        window.BidderState.setBidderId(bidderId, email);
-        window.BidderState.setUser(u);
-        L("auth", "signed in (uid=" + u.uid + ")");
+
+        // state反映（存在するものだけ呼ぶ）
+        safeCall(window.BidderState, "setBidderId", bidderId, email);
+        safeCall(window.BidderState, "setUser", u);
+        setLoginState("SIGNED-IN");
+
+        // ログイン時は認証はLOCKEDのまま（入札認証が別工程）
+        safeCall(window.BidderState, "setAuthState", "LOCKED");
+
+        L("auth", "SIGNED-IN uid=" + (u ? u.uid : "(none)"));
         return u;
       })
       .catch(function(e){
@@ -37,14 +111,20 @@
       });
   }
 
+  // =========================================================
+  // [AUTH-02] ログアウト
+  // =========================================================
   function signOut(){
-    // [AUTH-02] ログアウト
+    var auth = ensureFirebaseAuth();
+
     L("logout", "clicked");
-    return firebase.auth().signOut()
+    return auth.signOut()
       .then(function(){
-        window.BidderState.setUser(null);
-        window.BidderState.setAuthState("LOCKED");
-        window.BidderState.setBidderId("", "");
+        safeCall(window.BidderState, "setUser", null);
+        safeCall(window.BidderState, "setAuthState", "LOCKED");
+        safeCall(window.BidderState, "setBidderId", "", "");
+        setLoginState("SIGNED-OUT");
+
         L("logout", "OK");
         return true;
       })
@@ -55,41 +135,71 @@
       });
   }
 
+  // =========================================================
+  // [AUTH-03] 認証状態の監視（起動時に1回呼ぶ想定）
+  // =========================================================
   function watchAuthState(){
-    // [AUTH-03] onAuthStateChanged
-    firebase.auth().onAuthStateChanged(function(user){
-      window.BidderState.setUser(user || null);
+    var auth = ensureFirebaseAuth();
+
+    auth.onAuthStateChanged(function(user){
+      safeCall(window.BidderState, "setUser", user || null);
+
       if(!user){
-        // 状態リセット（最低限）
-        window.BidderState.setAuthState("LOCKED");
+        safeCall(window.BidderState, "setAuthState", "LOCKED");
+        setLoginState("SIGNED-OUT");
+        L("authStateChanged", "SIGNED-OUT (auth=LOCKED)");
+      }else{
+        setLoginState("SIGNED-IN");
+        // 入札認証は別工程なのでここではLOCKEDのままにする（上書きしない）
+        L("authStateChanged", "SIGNED-IN uid=" + user.uid);
       }
-      // NOTE: data load は app 側で実施
-      L("authStateChanged", "renderAll OK");
     });
   }
 
+  // =========================================================
+  // [AUTH-04] 入札認証（従来どおり：現状は簡易）
+  // =========================================================
   function bidAuth(authCode){
-    // [AUTH-04] 入札認証（従来どおり）
-    // ここは「bids/{bidNo}.note / memo / authCode」等の仕様に合わせる必要があります。
-    // 今回は「画面入力が空でない」かつ「ログイン済み」ならUNLOCKするサンプル。
+    // 要件: 空の場合は「認証コードを入力してください。」
     if(!authCode){
-      throw new Error("認証コードが空です");
+      throw new Error("認証コードを入力してください。");
     }
-    if(window.BidderState.get().loginState !== "SIGNED-IN"){
+
+    var ls = getLoginState();
+    if(ls !== "SIGNED-IN"){
       throw new Error("未ログインです");
     }
 
-    // 既存の仕様が「bids の備考5と照合」なら、DBから値を取り出して比較してください。
-    window.BidderState.setAuthState("UNLOCKED");
-    L("auth", "OK");
+    // TODO: 既存仕様が「bids の備考5と照合」なら、ここでDB照合を実装
+    safeCall(window.BidderState, "setAuthState", "UNLOCKED");
+    L("auth", "UNLOCKED (bidAuth OK)");
     return true;
   }
 
+  // =========================================================
+  // [AUTH-05] 互換：10_bidder_app.js が呼ぶ名前に合わせる
+  // =========================================================
+  function unlockByCode(authCode){
+    // await されてもOKなように Promise 化
+    try{
+      var r = bidAuth(authCode);
+      return Promise.resolve(r);
+    }catch(e){
+      return Promise.reject(e);
+    }
+  }
+
+  // 公開API
   window.BidderAuth = {
     bidderIdToEmail: bidderIdToEmail,
     signIn: signIn,
     signOut: signOut,
     watchAuthState: watchAuthState,
-    bidAuth: bidAuth
+
+    // 既存名
+    bidAuth: bidAuth,
+
+    // 追加名（10側互換）
+    unlockByCode: unlockByCode
   };
 })();
