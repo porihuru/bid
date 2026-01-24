@@ -1,7 +1,7 @@
-/* [JST 2026-01-24 21:00]  07_bidder_offer.js v20260124-01 */
+/* [JST 2026-01-24 21:00]  07_bidder_offer.js v20260124-02 */
 (function(){
   var FILE = "07_bidder_offer.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260124-02";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
@@ -13,60 +13,75 @@
   window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
   L("ver", TS + " " + FILE + " " + VER);
 
-  function buildOfferLinesFromItems(items){
-    // [OF-01] items -> offerLines（入力欄の枠）
-    var lines = [];
-    for(var i=0;i<items.length;i++){
-      var it = items[i];
-      lines.push({
-        itemId: it._id || ("row" + i),
-        no: (it.no!=null)?it.no:(it.seq!=null?it.seq:(i+1)),
-        unitPrice: "",   // 入札単価
-        note: ""         // 追記備考（任意）
-      });
-    }
-    return lines;
+  function _isoNow(){
+    return new Date().toISOString();
   }
 
+  // items の各行に対応する入力を UI から読む
   function readOfferLinesFromUI(){
-    // [OF-02] UI -> offerLines
     var st = window.BidderState.get();
     var items = st.items || [];
-    var lines = [];
+
+    // ★重要★ ルールは lines を map として要求（array不可）
+    // ここでは key=seq(no) の文字列、valueは {unitPrice, note} の map にする
+    // （ルールは lines の中身までは型検証していないため、将来拡張可能）
+    var linesMap = {};
+
     for(var i=0;i<items.length;i++){
       var it = items[i];
-      var id = (it._id || ("row"+i));
+      var id = it._id || ("row"+i);
+
+      var seq = (it.seq!=null)?it.seq:((it.no!=null)?it.no:(i+1));
+      var key = "" + seq;
+
       var upEl = document.getElementById("up_" + id);
       var ntEl = document.getElementById("nt_" + id);
-      lines.push({
-        itemId: id,
-        no: (it.no!=null)?it.no:(it.seq!=null?it.seq:(i+1)),
-        unitPrice: upEl ? (upEl.value||"") : "",
-        note: ntEl ? (ntEl.value||"") : ""
-      });
+
+      var unitPrice = upEl ? (upEl.value || "") : "";
+      var note      = ntEl ? (ntEl.value || "") : "";
+
+      linesMap[key] = { unitPrice: unitPrice, note: note };
     }
-    window.BidderState.setOfferLines(lines);
-    return lines;
+
+    return linesMap;
   }
 
+  // ★重要★ validOffer(bidNo, bidderId) が要求する keys/型に合わせた payload を返す
   function buildOfferPayload(){
-    // [OF-03] 保存payload作成（profile + lines）
     var st = window.BidderState.get();
-    var p = st.profile || {};
-    var lines = readOfferLinesFromUI();
 
-    return {
-      profile: {
-        email: p.email, address: p.address, company: p.company, rep: p.rep, person: p.person, tel: p.tel
-      },
-      lines: lines,
-      bidStatus: (st.bid && st.bid.status) ? st.bid.status : null
+    var bidNo    = st.bidNo;
+    var bidderId = st.bidderId;
+    var uid      = (st.user && st.user.uid) ? st.user.uid : "";
+
+    var p = st.profile || {};
+    var now = _isoNow();
+
+    // ルールの profile.keys().hasOnly([...]) に一致させる
+    var profile = {
+      bidderId: bidderId,
+      email: p.email || "",
+      address: p.address || "",
+      companyName: p.company || "",
+      representativeName: p.rep || "",
+      contactName: p.person || "",
+      contactInfo: p.tel || ""
     };
+
+    var payload = {
+      bidNo: bidNo,
+      bidderId: bidderId,
+      profile: profile,
+      lines: readOfferLinesFromUI(),  // map
+      createdAt: now,                // string
+      updatedAt: now,                // string
+      updatedByUid: uid              // string
+    };
+
+    return payload;
   }
 
   window.BidderOffer = {
-    buildOfferLinesFromItems: buildOfferLinesFromItems,
-    readOfferLinesFromUI: readOfferLinesFromUI,
     buildOfferPayload: buildOfferPayload
   };
 })();
