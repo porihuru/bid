@@ -1,20 +1,27 @@
-// [JST 2026-01-23 22:30] js/08_bidder_render.js v20260123-01
-// [BID-08] 描画・表示制御（ログイン方式）
+// [JST 2026-01-24 21:00] bidder/js/08_bidder_render.js v20260124-01
+// [BID-08] 描画・表示制御（ログイン→認証→入力可否）
+// 要件:
+//  - 常に「今どういう状態か」を msgInfo と submitStatus と ログに出す
+//  - closed は完全閲覧
 (function (global) {
   var BID = global.BID = global.BID || {};
+  if (BID.Build && BID.Build.register) BID.Build.register("08_bidder_render.js", "v20260124-01");
 
   function el(id) { return document.getElementById(id); }
+
   function show(id, yes) {
     var e = el(id);
     if (!e) return;
     e.style.display = yes ? "" : "none";
   }
+
   function setText(id, s) {
     var e = el(id);
     if (e) e.textContent = (s == null) ? "" : String(s);
   }
 
   BID.Render = {
+    // [08-01] メッセージ
     clearMessages: function () {
       show("msgError", false); setText("msgError", "");
       show("msgOk", false); setText("msgOk", "");
@@ -22,13 +29,19 @@
     },
 
     setError: function (msg) {
-      show("msgError", true); setText("msgError", msg || "");
-      show("msgOk", false); setText("msgOk", "");
+      show("msgError", true);
+      setText("msgError", msg || "");
+      show("msgOk", false);
+      setText("msgOk", "");
     },
+
     setOk: function (msg) {
-      show("msgOk", true); setText("msgOk", msg || "");
-      show("msgError", false); setText("msgError", "");
+      show("msgOk", true);
+      setText("msgOk", msg || "");
+      show("msgError", false);
+      setText("msgError", "");
     },
+
     setInfo: function (msg) {
       setText("msgInfo", msg || "");
     },
@@ -37,18 +50,23 @@
       setText("authResult", msg || "");
     },
 
+    setLoginResult: function (msg) {
+      setText("loginResult", msg || "");
+    },
+
     setProfileStatus: function (missArr) {
       missArr = missArr || [];
       if (!missArr.length) setText("profileStatus", "必須入力：OK");
       else setText("profileStatus", "必須未入力： " + missArr.join(" / "));
     },
 
+    // [08-02] ステータスバー
     renderStatusBar: function () {
       var st = BID.State.get();
       setText("sbBidNo", st.bidNo || "(未設定)");
       setText("sbBidStatus", st.bidStatus ? (BID.CONFIG.STATUS_LABELS[st.bidStatus] || st.bidStatus) : "(未読込)");
-      setText("sbLoginState", st.user ? "OK" : "NG");
-      setText("sbBidderId", st.bidderId || "-");
+      setText("sbLoginState", st.loginState || "SIGNED-OUT");
+      setText("sbBidderId", st.bidderNo || "-");
       setText("sbAuthState", st.authState || "LOCKED");
       setText("sbInputState", st.inputEnabled ? "可" : "不可");
       setText("sbMode", st.viewOnly ? "VIEW-ONLY" : "EDIT");
@@ -56,6 +74,7 @@
       setText("sbLastSaved", st.lastSavedAt || "-");
     },
 
+    // [08-03] 入札概要
     renderBidInfo: function () {
       var st = BID.State.get();
       var b = st.bid || {};
@@ -74,10 +93,12 @@
       setText("txtNote4", notes.note4 || "");
     },
 
+    // [08-04] 品目
     renderItems: function () {
       var st = BID.State.get();
       var tbody = el("itemsTbody");
       if (!tbody) return;
+
       while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
 
       var items = st.items || [];
@@ -89,6 +110,7 @@
 
       for (var i = 0; i < items.length; i++) {
         var it = items[i];
+
         var tr = document.createElement("tr");
         tr.id = "itemRow_" + it.seq;
 
@@ -143,45 +165,49 @@
       }
     },
 
+    // [08-05] 画面制御（常に理由を出す）
     applyMode: function () {
       var st = BID.State.get();
-
-      // logged in required
-      var signedIn = !!st.user;
-
-      // status
       var status = st.bidStatus || "";
+
+      // closedは完全閲覧
       var viewOnly = (status === "closed");
       BID.State.setViewOnly(viewOnly);
 
-      // profile editable: open + signedIn + unlocked
-      var profileEditable = (signedIn && !viewOnly && status === "open" && st.authState === "UNLOCKED");
-
-      // bidderId はログイン由来なので基本固定（入力は不可にする）
-      if (el("inpBidderId")) {
-        el("inpBidderId").disabled = true;
-        el("inpBidderId").value = st.bidderId || "";
+      // 入力可能条件:
+      // open AND SIGNED-IN AND UNLOCKED AND profile COMPLETE AND not viewOnly
+      var canInput = false;
+      if (!viewOnly &&
+          status === "open" &&
+          st.loginState === "SIGNED-IN" &&
+          st.authState === "UNLOCKED" &&
+          st.profileState === "COMPLETE") {
+        canInput = true;
       }
+      BID.State.setInputEnabled(canInput);
 
+      // ログインUI
+      var loginEditable = (st.loginState !== "SIGNED-IN");
+      if (el("loginBidderId")) el("loginBidderId").disabled = !loginEditable;
+      if (el("loginPassword")) el("loginPassword").disabled = !loginEditable;
+      if (el("btnLogin")) el("btnLogin").disabled = !loginEditable;
+      if (el("btnLogout")) el("btnLogout").disabled = (st.loginState !== "SIGNED-IN");
+
+      // 認証UI（openのときだけ有効、かつログイン必須）
+      show("authSection", true);
+      var authEnable = (status === "open" && st.loginState === "SIGNED-IN");
+      if (el("authCode")) el("authCode").disabled = !authEnable;
+      if (el("btnAuth")) el("btnAuth").disabled = !authEnable;
+
+      // 入札者情報UI（open + ログイン + 認証後のみ入力可）
       var profileInputs = ["inpEmail","inpAddress","inpCompanyName","inpRepresentativeName","inpContactName","inpContactInfo"];
+      var profileEditable = (!viewOnly && status === "open" && st.loginState === "SIGNED-IN" && st.authState === "UNLOCKED");
       for (var i = 0; i < profileInputs.length; i++) {
         var ei = el(profileInputs[i]);
         if (ei) ei.disabled = !profileEditable;
       }
 
-      // auth section enabled: signedIn + open
-      show("authSection", true);
-      if (el("authCode")) el("authCode").disabled = !(signedIn && status === "open" && !viewOnly);
-      if (el("btnAuth")) el("btnAuth").disabled = !(signedIn && status === "open" && !viewOnly);
-
-      // can input: signedIn + open + unlocked + profile complete + not viewOnly
-      var canInput = false;
-      if (signedIn && !viewOnly && status === "open" && st.authState === "UNLOCKED" && st.profileState === "COMPLETE") {
-        canInput = true;
-      }
-      BID.State.setInputEnabled(canInput);
-
-      // unit price inputs
+      // 単価入力欄
       var items = st.items || [];
       for (var j = 0; j < items.length; j++) {
         var seq = String(items[j].seq);
@@ -189,17 +215,16 @@
         if (ip) ip.disabled = !canInput;
       }
 
-      // buttons
+      // 保存ボタン
       if (el("btnSubmit")) el("btnSubmit").disabled = !canInput;
 
-      // load offer / print / pdf はログイン必須（closedでも閲覧可）
-      if (el("btnLoadOffer")) el("btnLoadOffer").disabled = !signedIn;
-      if (el("btnPrint")) el("btnPrint").disabled = false;
-      if (el("btnPdf")) el("btnPdf").disabled = false;
+      // 「入力済データの読み込み」はログイン後のみ
+      if (el("btnLoadOffer")) el("btnLoadOffer").disabled = (st.loginState !== "SIGNED-IN");
 
-      // reason
+      // 理由（常時）
       var reason = "";
-      if (!signedIn) reason = "ログインしてください。";
+      if (!st.bidNo) reason = "入札番号が未設定です。";
+      else if (st.loginState !== "SIGNED-IN") reason = "先にログインしてください。";
       else if (!status) reason = "入札データを読み込み中です。";
       else if (status === "draft") reason = "この入札は準備中（draft）です。入札開始までお待ちください。";
       else if (status === "closed") reason = "入札は終了しました（closed）。完全閲覧モードです。";
@@ -210,21 +235,37 @@
 
       BID.Render.setInfo(reason);
 
-      // submitStatus（押せない理由が見える）
+      // 追加：submitStatusにも必ず出す
       var ss = el("submitStatus");
       if (ss) {
         ss.textContent =
-          "判定: signedIn=" + (signedIn ? "true" : "false") +
-          " / status=" + (status || "(none)") +
+          "判定: status=" + (status || "(none)") +
+          " / login=" + (st.loginState || "(none)") +
+          " / bidderId=" + (st.bidderNo || "(none)") +
           " / auth=" + (st.authState || "(none)") +
           " / profile=" + (st.profileState || "(none)") +
           " / inputEnabled=" + (st.inputEnabled ? "true" : "false") +
-          " / viewOnly=" + (st.viewOnly ? "true" : "false");
+          " / viewOnly=" + (st.viewOnly ? "true" : "false") +
+          " / reason=" + reason;
       }
+
+      // ログ（うるさければ後で抑制可能）
+      try {
+        if (BID.Log && BID.Log.write) {
+          BID.Log.write("[mode] status=" + (status || "(none)") +
+            " login=" + (st.loginState || "(none)") +
+            " bidderId=" + (st.bidderNo || "(none)") +
+            " auth=" + (st.authState || "(none)") +
+            " profile=" + (st.profileState || "(none)") +
+            " input=" + (st.inputEnabled ? "true" : "false") +
+            " viewOnly=" + (st.viewOnly ? "true" : "false"));
+        }
+      } catch (e) {}
 
       BID.Render.renderStatusBar();
     },
 
+    // [08-99] 全体描画
     renderAll: function () {
       BID.Render.renderStatusBar();
       BID.Render.renderBidInfo();
@@ -233,5 +274,4 @@
     }
   };
 
-  try { if (BID.Log && BID.Log.ver) BID.Log.ver("08_bidder_render.js", "v20260123-01"); } catch (e) {}
 })(window);
