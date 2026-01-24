@@ -1,59 +1,48 @@
-/* [JST 2026-01-24 22:10]  10_bidder_app.js v20260124-02
-   目的:
-   - 個別JS構成で動く「入札フォーム（入札者）」の起動・イベント結線・制御（メイン）
-   - ログが流れ続けてコピー不能になる問題を避ける（無駄な連続renderをしない）
-   - 05_bidder_auth.js の watchAuthState / unlockByCode に対応
-
-   依存（想定）:
-   - BidderConfig (01)
-   - BidderState  (02)
-   - BidderLog    (03)
-   - BidderDB     (04)
-   - BidderAuth   (05)
-   - BidderProfile(06)
-   - BidderOffer  (07)
-   - BidderRender (08)
-   - BidderPrint  (09)
+/* [JST 2026-01-24 22:25]  10_bidder_app.js v20260124-03
+   - index.html のIDに完全一致（btnLoad, txtBidderId, btnAuth, btnSaveOffer等）
+   - 05_bidder_auth.js が bidAuth() しか持たない場合にも対応
+   - ログが流れ続ける問題を避ける：不要な連続描画・連続ログを抑制
 */
 (function(){
   "use strict";
 
   var FILE = "10_bidder_app.js";
-  var VER  = "v20260124-02";
+  var VER  = "v20260124-03";
   var TS   = new Date().toISOString();
 
-  // =========================================================
-  // ログ・バージョン
-  // =========================================================
+  // ----------------------------
+  // logging / version
+  // ----------------------------
   function L(tag, msg){
-    if(window.BidderLog && window.BidderLog.write) window.BidderLog.write(tag, msg);
-    else try{ console.log("[" + tag + "] " + msg); }catch(e){}
+    if(window.BidderLog && typeof window.BidderLog.write === "function"){
+      window.BidderLog.write(tag, msg);
+    }else{
+      try{ console.log("[" + tag + "] " + msg); }catch(e){}
+    }
   }
   if(!window.__APP_VER__){ window.__APP_VER__ = []; }
   window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
   L("ver", TS + " " + FILE + " " + VER);
 
-  // =========================================================
-  // ユーティリティ
-  // =========================================================
-  function $(sel){ try{ return document.querySelector(sel); }catch(e){ return null; } }
-  function val(sel){
-    var el = $(sel);
-    if(!el) return "";
-    return (el.value != null) ? String(el.value).trim() : "";
+  // ----------------------------
+  // DOM helpers
+  // ----------------------------
+  function $(id){
+    try{ return document.getElementById(id); }catch(e){ return null; }
   }
-  function setText(sel, text){
-    var el = $(sel);
-    if(el) el.textContent = (text == null ? "" : String(text));
+  function V(id){
+    var el = $(id);
+    if(!el) return "";
+    return (el.value == null) ? "" : String(el.value).trim();
   }
 
-  function safeCall(obj, fnName /*, args... */){
+  function safeCall(obj, fn /*, args */){
     try{
-      if(obj && typeof obj[fnName] === "function"){
-        return obj[fnName].apply(obj, Array.prototype.slice.call(arguments, 2));
+      if(obj && typeof obj[fn] === "function"){
+        return obj[fn].apply(obj, Array.prototype.slice.call(arguments, 2));
       }
     }catch(e){
-      L("app", "safeCall FAILED " + fnName + " " + (e && e.message ? e.message : e));
+      L("app", "safeCall FAILED " + fn + " " + (e && e.message ? e.message : e));
     }
     return undefined;
   }
@@ -67,52 +56,47 @@
     return {};
   }
 
-  // =========================================================
-  // render の「連打防止」
-  // =========================================================
-  var __renderScheduled = false;
+  // ----------------------------
+  // render throttle (copy邪魔対策)
+  // ----------------------------
+  var _renderScheduled = false;
   function scheduleRender(reason){
-    if(__renderScheduled) return;
-    __renderScheduled = true;
+    if(_renderScheduled) return;
+    _renderScheduled = true;
     setTimeout(function(){
-      __renderScheduled = false;
+      _renderScheduled = false;
       try{
         if(window.BidderRender && typeof window.BidderRender.renderAll === "function"){
           window.BidderRender.renderAll();
-          if(reason) L("render", "renderAll OK (" + reason + ")");
-        }else{
-          if(reason) L("render", "renderAll SKIP (BidderRender.renderAll missing) (" + reason + ")");
+          if(reason) L("render", "OK (" + reason + ")");
         }
       }catch(e){
-        L("render", "renderAll FAILED " + (e && e.message ? e.message : e));
+        L("render", "FAILED " + (e && e.message ? e.message : e));
       }
     }, 0);
   }
 
-  // =========================================================
-  // モード判定（入力可否・閲覧モード）
-  // =========================================================
+  // ----------------------------
+  // mode compute
+  // ----------------------------
   function computeMode(){
     var st = getState();
 
-    var bidStatus    = (st.bid && st.bid.status) ? st.bid.status : "(none)";
-    var loginState   = st.loginState   || "SIGNED-OUT";
-    var authState    = st.authState    || "LOCKED";       // LOCKED / UNLOCKED
-    var profileState = st.profileState || "INCOMPLETE";   // INCOMPLETE / COMPLETE
+    // loginState が State に無い場合、userの有無で補正（重要）
+    var user = st.user || null;
+    var loginState = st.loginState || (user ? "SIGNED-IN" : "SIGNED-OUT");
 
-    // closed 後は閲覧のみ
-    var viewOnly = (bidStatus === "closed");
+    var bidStatus  = (st.bid && st.bid.status) ? st.bid.status : "(none)";
+    var authState  = st.authState || "LOCKED";              // LOCKED / UNLOCKED
+    var profState  = st.profileState || "INCOMPLETE";       // INCOMPLETE / COMPLETE
 
-    // 入力可能条件:
-    // - bidStatus=open
-    // - login=SIGNED-IN
-    // - auth=UNLOCKED
-    // - profile=COMPLETE
+    var viewOnly   = (bidStatus === "closed");
+
     var inputEnabled = (
       bidStatus === "open" &&
       loginState === "SIGNED-IN" &&
       authState === "UNLOCKED" &&
-      profileState === "COMPLETE" &&
+      profState === "COMPLETE" &&
       !viewOnly
     );
 
@@ -120,7 +104,7 @@
       bidStatus: bidStatus,
       loginState: loginState,
       authState: authState,
-      profileState: profileState,
+      profileState: profState,
       viewOnly: !!viewOnly,
       inputEnabled: !!inputEnabled
     };
@@ -129,10 +113,11 @@
   function applyMode(reason){
     var m = computeMode();
 
-    // 既存 State API があれば更新（無ければスキップ）
     safeCall(window.BidderState, "setViewOnly", m.viewOnly);
     safeCall(window.BidderState, "setInputEnabled", m.inputEnabled);
+    safeCall(window.BidderState, "setLoginState", m.loginState); // 実装が無ければ無視
 
+    // 連続で同じ内容を出しやすいので、ここは「必要最小限」にする
     L("mode",
       "status=" + m.bidStatus +
       " login=" + m.loginState +
@@ -146,9 +131,9 @@
     scheduleRender(reason || "applyMode");
   }
 
-  // =========================================================
-  // データロード
-  // =========================================================
+  // ----------------------------
+  // load
+  // ----------------------------
   function loadAll(reason){
     var st = getState();
     var bidNo = (window.BidderConfig && window.BidderConfig.BID_NO) ? window.BidderConfig.BID_NO : (st.bidNo || "");
@@ -159,8 +144,6 @@
 
     L("load", "bids/" + bidNo + " ...");
 
-    // BidderDB 側のAPI差異に対応
-    // 優先: loadAll(bidNo) -> loadBid + loadItems
     var p;
     if(window.BidderDB && typeof window.BidderDB.loadAll === "function"){
       p = window.BidderDB.loadAll(bidNo);
@@ -171,8 +154,9 @@
     }
 
     return Promise.resolve(p).then(function(){
-      applyMode(reason || "loadAll");
+      safeCall(window.BidderState, "setLastLoadedAt", new Date().toISOString());
       L("load", "OK");
+      applyMode(reason || "loadAll");
       return true;
     }).catch(function(e){
       L("load", "FAILED " + (e && e.message ? e.message : e));
@@ -181,66 +165,57 @@
     });
   }
 
-  function clearAll(reason){
-    // ログアウト後の表示クリア
-    safeCall(window.BidderState, "setOffer", null);
-    safeCall(window.BidderState, "setOfferLines", {});
-    safeCall(window.BidderState, "setBid", { status:"(empty)" });
-    safeCall(window.BidderState, "setItems", []);
-    safeCall(window.BidderState, "setProfileState", "INCOMPLETE");
-    applyMode(reason || "clearAll");
+  // ----------------------------
+  // actions
+  // ----------------------------
+  function onReload(){
+    L("reload", "clicked");
+    loadAll("reload").catch(function(){});
   }
 
-  // =========================================================
-  // ボタン処理
-  // =========================================================
   function onLogin(){
-    // 入札者ID/PW
-    var bidderId = val("#bidderId");
-    var password = val("#bidderPassword");
-
-    if(!bidderId){
-      L("login", "FAILED 入札者IDが空です");
-      return;
-    }
-    if(!password){
-      L("login", "FAILED パスワードが空です");
-      return;
-    }
-
-    L("login", "clicked bidderId=" + bidderId);
+    var bidderId = V("txtBidderId");
+    var pass     = V("txtBidderPass");
+    if(!bidderId){ L("login", "FAILED 入札者IDが空です"); return; }
+    if(!pass){     L("login", "FAILED パスワードが空です"); return; }
 
     if(!(window.BidderAuth && typeof window.BidderAuth.signIn === "function")){
       L("login", "FAILED BidderAuth.signIn missing");
       return;
     }
 
-    // loginState を先に出す（体感の改善）
+    L("login", "clicked bidderId=" + bidderId);
+
+    // 体感改善（先に状態反映）
     safeCall(window.BidderState, "setBidderId", bidderId, "");
-    safeCall(window.BidderState, "setLoginState", "SIGNING-IN"); // 実装が無ければ無視される
+    safeCall(window.BidderState, "setLoginState", "SIGNING-IN");
     scheduleRender("login-clicked");
 
-    window.BidderAuth.signIn(bidderId, password)
+    window.BidderAuth.signIn(bidderId, pass)
       .then(function(){
+        safeCall(window.BidderState, "setLoginState", "SIGNED-IN");
         L("login", "OK");
         return loadAll("after-login");
       })
       .catch(function(e){
+        safeCall(window.BidderState, "setLoginState", "SIGNED-OUT");
         L("login", "FAILED " + (e && e.message ? e.message : e));
         applyMode("login-failed");
       });
   }
 
   function onLogout(){
-    L("logout", "clicked");
     if(!(window.BidderAuth && typeof window.BidderAuth.signOut === "function")){
       L("logout", "FAILED BidderAuth.signOut missing");
       return;
     }
+    L("logout", "clicked");
+
     window.BidderAuth.signOut()
       .then(function(){
+        safeCall(window.BidderState, "setLoginState", "SIGNED-OUT");
         L("logout", "OK");
-        clearAll("after-logout");
+        applyMode("after-logout");
       })
       .catch(function(e){
         L("logout", "FAILED " + (e && e.message ? e.message : e));
@@ -248,34 +223,40 @@
   }
 
   function onBidAuth(){
-    // 認証コード（備考5など）
-    var code = val("#bidAuthCode");
+    var code = V("txtAuthCode");
     L("auth", "clicked");
 
-    if(!(window.BidderAuth && typeof window.BidderAuth.unlockByCode === "function")){
-      L("auth", "FAILED BidderAuth.unlockByCode missing");
+    // 05が unlockByCode を持つ場合
+    if(window.BidderAuth && typeof window.BidderAuth.unlockByCode === "function"){
+      window.BidderAuth.unlockByCode(code)
+        .then(function(){
+          L("auth", "OK");
+          applyMode("after-auth");
+        })
+        .catch(function(e){
+          L("auth", "FAILED " + (e && e.message ? e.message : e));
+          applyMode("auth-failed");
+        });
       return;
     }
 
-    window.BidderAuth.unlockByCode(code)
-      .then(function(){
-        L("auth", "OK");
-        // 認証が通れば入力可否が変わる
+    // 05が bidAuth を持つ場合（あなたの提示はこれ）
+    if(window.BidderAuth && typeof window.BidderAuth.bidAuth === "function"){
+      try{
+        var ok = window.BidderAuth.bidAuth(code); // throwする設計
+        L("auth", ok ? "OK" : "FAILED");
         applyMode("after-auth");
-      })
-      .catch(function(e){
+      }catch(e){
         L("auth", "FAILED " + (e && e.message ? e.message : e));
         applyMode("auth-failed");
-      });
+      }
+      return;
+    }
+
+    L("auth", "FAILED BidderAuth.unlockByCode / bidAuth missing");
   }
 
-  function onReload(){
-    L("reload", "clicked");
-    loadAll("reload").catch(function(){});
-  }
-
-  function onLoadProfile(){
-    // Cookie/保存データの読込
+  function onProfileLoad(){
     L("cookie", "load clicked");
     if(window.BidderProfile && typeof window.BidderProfile.loadFromCookie === "function"){
       try{
@@ -286,11 +267,26 @@
         L("cookie", "load FAILED " + (e && e.message ? e.message : e));
       }
     }else{
-      L("cookie", "load SKIP (BidderProfile.loadFromCookie missing)");
+      L("cookie", "load SKIP (loadFromCookie missing)");
     }
   }
 
-  function onClearCookie(){
+  function onProfileSave(){
+    L("cookie", "save clicked");
+    if(window.BidderProfile && typeof window.BidderProfile.saveToCookie === "function"){
+      try{
+        var ok = window.BidderProfile.saveToCookie();
+        L("cookie", ok ? "save OK" : "save FAILED");
+        applyMode("after-cookie-save");
+      }catch(e){
+        L("cookie", "save FAILED " + (e && e.message ? e.message : e));
+      }
+    }else{
+      L("cookie", "save SKIP (saveToCookie missing)");
+    }
+  }
+
+  function onCookieClear(){
     L("cookie", "clear clicked");
     if(window.BidderProfile && typeof window.BidderProfile.clearCookie === "function"){
       try{
@@ -301,47 +297,46 @@
         L("cookie", "clear FAILED " + (e && e.message ? e.message : e));
       }
     }else{
-      L("cookie", "clear SKIP (BidderProfile.clearCookie missing)");
+      L("cookie", "clear SKIP (clearCookie missing)");
     }
   }
 
   function onSaveOffer(){
-    // 1) profile をCookie保存（要件）
+    L("save", "clicked");
+
+    // プロフィールは保存しておく（要件）
     if(window.BidderProfile && typeof window.BidderProfile.saveToCookie === "function"){
       try{
-        var ok = window.BidderProfile.saveToCookie();
-        L("cookie", ok ? "save OK" : "save FAILED");
+        window.BidderProfile.saveToCookie();
+        L("cookie", "save OK (auto)");
       }catch(e){
-        L("cookie", "save FAILED " + (e && e.message ? e.message : e));
+        L("cookie", "save FAILED (auto) " + (e && e.message ? e.message : e));
       }
-    }else{
-      L("cookie", "save SKIP (BidderProfile.saveToCookie missing)");
     }
 
-    // 2) 入札(offer)保存
     var st = getState();
     var bidNo = (window.BidderConfig && window.BidderConfig.BID_NO) ? window.BidderConfig.BID_NO : (st.bidNo || "");
     var bidderId = st.bidderId || "";
+    if(!bidNo){ L("save", "FAILED bidNo empty"); return; }
+    if(!bidderId){ L("save", "FAILED bidderId empty"); return; }
 
-    L("save", "clicked");
-    if(!bidNo){
-      L("save", "FAILED bidNo empty");
-      return;
-    }
-    if(!bidderId){
-      L("save", "FAILED bidderId empty");
-      return;
-    }
-
-    // Offer保存API差異に対応
-    // 優先: BidderOffer.upsertOffer(bidNo, bidderId) -> BidderDB.upsertOffer(bidNo, bidderId, data)
-    var p = null;
-
+    // 優先：07側の upsertOffer があれば呼ぶ（state参照型）
     if(window.BidderOffer && typeof window.BidderOffer.upsertOffer === "function"){
-      L("save", "upsertOffer ... bidderId=" + bidderId);
-      p = window.BidderOffer.upsertOffer(); // 既存が state 参照型の場合
-    }else if(window.BidderDB && typeof window.BidderDB.upsertOffer === "function"){
-      // state から data を組み立て（rulesの validOffer に合わせる）
+      Promise.resolve(window.BidderOffer.upsertOffer())
+        .then(function(){
+          safeCall(window.BidderState, "setLastSavedAt", new Date().toISOString());
+          L("save", "OK");
+          return loadAll("after-save");
+        })
+        .catch(function(e){
+          L("save", "FAILED " + (e && e.message ? e.message : e));
+          applyMode("save-failed");
+        });
+      return;
+    }
+
+    // 04側に upsertOffer がある場合（rules validOffer形に寄せる）
+    if(window.BidderDB && typeof window.BidderDB.upsertOffer === "function"){
       var nowIso = new Date().toISOString();
       var data = {
         bidNo: bidNo,
@@ -352,33 +347,28 @@
         updatedAt: nowIso,
         updatedByUid: (st.user && st.user.uid) ? st.user.uid : ""
       };
-      L("save", "upsertOffer(DB) ... bidderId=" + bidderId);
-      p = window.BidderDB.upsertOffer(bidNo, bidderId, data);
-    }else{
-      L("save", "FAILED no upsert API (BidderOffer.upsertOffer / BidderDB.upsertOffer missing)");
+
+      Promise.resolve(window.BidderDB.upsertOffer(bidNo, bidderId, data))
+        .then(function(){
+          safeCall(window.BidderState, "setLastSavedAt", new Date().toISOString());
+          L("save", "OK");
+          return loadAll("after-save");
+        })
+        .catch(function(e){
+          L("save", "FAILED " + (e && e.message ? e.message : e));
+          applyMode("save-failed");
+        });
       return;
     }
 
-    Promise.resolve(p).then(function(){
-      L("save", "OK");
-      // 再読込して確定状態を表示したい場合
-      return loadAll("after-save");
-    }).catch(function(e){
-      // ここで rules / 権限エラーが来る
-      L("save", "FAILED " + (e && e.message ? e.message : e));
-      applyMode("save-failed");
-    });
+    L("save", "FAILED upsert API missing (BidderOffer.upsertOffer / BidderDB.upsertOffer)");
   }
 
   function onPrint(){
     L("print", "clicked");
     if(window.BidderPrint && typeof window.BidderPrint.print === "function"){
-      try{
-        window.BidderPrint.print();
-        L("print", "OK");
-      }catch(e){
-        L("print", "FAILED " + (e && e.message ? e.message : e));
-      }
+      try{ window.BidderPrint.print(); L("print", "OK"); }
+      catch(e){ L("print", "FAILED " + (e && e.message ? e.message : e)); }
     }else{
       L("print", "SKIP (BidderPrint.print missing)");
     }
@@ -387,56 +377,107 @@
   function onPdf(){
     L("pdf", "clicked");
     if(window.BidderPrint && typeof window.BidderPrint.pdf === "function"){
-      try{
-        window.BidderPrint.pdf();
-        L("pdf", "OK");
-      }catch(e){
-        L("pdf", "FAILED " + (e && e.message ? e.message : e));
-      }
+      try{ window.BidderPrint.pdf(); L("pdf", "OK"); }
+      catch(e){ L("pdf", "FAILED " + (e && e.message ? e.message : e)); }
     }else{
       L("pdf", "SKIP (BidderPrint.pdf missing)");
     }
   }
+
+  // ----------------------------
+  // log controls (存在すれば使う)
+  // ----------------------------
+  var _logPaused = false;
 
   function onLogClear(){
     if(window.BidderLog && typeof window.BidderLog.clear === "function"){
       window.BidderLog.clear();
       L("log", "clear OK");
     }else{
-      // BidderLog.clear が無くても console には出せる
-      L("log", "clear SKIP (BidderLog.clear missing)");
+      // txtLog を直接消すフォールバック
+      var t = $("txtLog");
+      if(t) t.value = "";
+      L("log", "clear OK (fallback)");
     }
     scheduleRender("log-clear");
   }
 
-  // =========================================================
-  // イベント結線
-  // =========================================================
-  function bind(id, handler){
-    var el = document.getElementById(id);
+  function onLogPause(){
+    _logPaused = !_logPaused;
+
+    // 03側に pause/resume か setPaused があれば使用
+    if(window.BidderLog && typeof window.BidderLog.setPaused === "function"){
+      window.BidderLog.setPaused(_logPaused);
+    }else if(window.BidderLog && _logPaused && typeof window.BidderLog.pause === "function"){
+      window.BidderLog.pause();
+    }else if(window.BidderLog && !_logPaused && typeof window.BidderLog.resume === "function"){
+      window.BidderLog.resume();
+    }
+
+    var btn = $("btnLogPause");
+    if(btn) btn.textContent = _logPaused ? "ログ再開" : "ログ停止";
+    L("log", _logPaused ? "paused" : "resumed");
+  }
+
+  function onLogCopy(){
+    // 03側に copyAll があればそれを優先
+    if(window.BidderLog && typeof window.BidderLog.copyAll === "function"){
+      window.BidderLog.copyAll();
+      L("log", "copy OK (BidderLog.copyAll)");
+      return;
+    }
+
+    // フォールバック：txtLog を clipboard へ
+    var t = $("txtLog");
+    if(!t){ L("log", "copy FAILED (txtLog missing)"); return; }
+    try{
+      // iOS対策：まず停止
+      if(!_logPaused) onLogPause();
+
+      var text = t.value || "";
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text)
+          .then(function(){ L("log", "copy OK"); })
+          .catch(function(e){
+            L("log", "copy FAILED " + (e && e.message ? e.message : e));
+          });
+      }else{
+        // 旧方式
+        t.focus();
+        t.select();
+        var ok = document.execCommand("copy");
+        L("log", ok ? "copy OK (execCommand)" : "copy FAILED (execCommand)");
+      }
+    }catch(e){
+      L("log", "copy FAILED " + (e && e.message ? e.message : e));
+    }
+  }
+
+  function onLogTapAutoPause(){
+    // 「ログ欄をタップすると停止」要件
+    if(!_logPaused) onLogPause();
+  }
+
+  // ----------------------------
+  // bind
+  // ----------------------------
+  function bind(id, fn){
+    var el = $(id);
     if(!el) return;
     el.addEventListener("click", function(ev){
-      try{
-        ev.preventDefault();
-      }catch(e){}
-      handler();
+      try{ ev.preventDefault(); }catch(e){}
+      fn();
     });
   }
 
-  // =========================================================
-  // 起動
-  // =========================================================
+  // ----------------------------
+  // boot
+  // ----------------------------
   function boot(){
     var bidNo = (window.BidderConfig && window.BidderConfig.BID_NO) ? window.BidderConfig.BID_NO : "";
-    L("config", "BID_NO=" + (bidNo || "(empty)"));
-    L("boot", "bidNo=" + (bidNo || "(empty)"));
+    L("boot", "BID_NO=" + (bidNo || "(empty)"));
 
-    // 初期表示（最低限）
-    safeCall(window.BidderState, "setViewOnly", false);
-    safeCall(window.BidderState, "setInputEnabled", false);
-    applyMode("boot");
-
-    // Auth監視（重要）
+    // Auth監視（05がやる）
     if(window.BidderAuth && typeof window.BidderAuth.watchAuthState === "function"){
       window.BidderAuth.watchAuthState();
       L("auth", "watchAuthState OK");
@@ -444,38 +485,53 @@
       L("auth", "watchAuthState missing");
     }
 
-    // ボタンIDはHTMLに合わせておく（存在しない場合は無視される）
-    bind("btnLogin", onLogin);
-    bind("btnLogout", onLogout);
-    bind("btnBidAuth", onBidAuth);
-    bind("btnReload", onReload);
-    bind("btnSave", onSaveOffer);
-    bind("btnLoadProfile", onLoadProfile);
+    // buttons
+    bind("btnLoad", onReload);
+    bind("btnProfileLoad", onProfileLoad);
     bind("btnPrint", onPrint);
     bind("btnPdf", onPdf);
-    bind("btnCookieClear", onClearCookie);
-    bind("btnLogClear", onLogClear);
+    bind("btnCookieClear", onCookieClear);
 
-    // 起動時：ログイン済みなら自動ロード
-    // （Auth監視が走った後に user が入る場合があるので少し遅らせる）
+    bind("btnLogin", onLogin);
+    bind("btnLogout", onLogout);
+    bind("btnAuth", onBidAuth);
+
+    bind("btnSaveProfile", onProfileSave);
+    bind("btnSaveOffer", onSaveOffer);
+
+    bind("btnLogClear", onLogClear);
+    bind("btnLogPause", onLogPause);
+    bind("btnLogCopy", onLogCopy);
+
+    // log tap auto pause
+    var logBox = $("txtLog");
+    if(logBox){
+      logBox.addEventListener("touchstart", onLogTapAutoPause, { passive:true });
+      logBox.addEventListener("mousedown", onLogTapAutoPause);
+    }
+
+    // 初回描画（状態反映）
+    applyMode("boot");
+
+    // 起動直後は「ログイン済みならロード」だけ実施（連打はしない）
     setTimeout(function(){
       var st = getState();
       if(st && st.user){
+        safeCall(window.BidderState, "setLoginState", "SIGNED-IN");
         loadAll("boot-autoload").catch(function(){});
       }else{
+        safeCall(window.BidderState, "setLoginState", "SIGNED-OUT");
         scheduleRender("boot-noautologin");
       }
-    }, 50);
+    }, 60);
   }
 
-  // DOM ready
   if(document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", boot);
   }else{
     boot();
   }
 
-  // 公開（デバッグ用途）
   window.BidderApp = {
     boot: boot,
     loadAll: loadAll,
