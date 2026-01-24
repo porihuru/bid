@@ -1,47 +1,36 @@
-// [JST 2026-01-22 22:05] bidder/js/01_bidder_config.js v20260122-01
-// [BID-01] 固定設定（単一入札専用）
-// 目的:
-//  - 入札番号（bidNo）をコード内に固定し、この入札にしか参加できないようにする
-//  - 備考キー・文言などを一元化する
-
+// [JST 2026-01-23 22:30] js/01_bidder_config.js v20260123-01
+// [BID-01] 設定（入札番号固定・ログイン方式）
 (function (global) {
   var BID = global.BID = global.BID || {};
-
-  // =========================================================
-  // [BID-01-01] 固定入札番号（ここを毎回変更する）
-  // =========================================================
-  // ★重要★：ここが空だと「入札番号が未設定」になります
-  var FIXED_BID_NO = "2026003"; // ←あなたの入札番号に変更
-
-  // =========================================================
-  // [BID-01-02] CONFIG
-  // =========================================================
   BID.CONFIG = {
-    // [BID-01-02-01] 入札番号（固定）
-    BID_NO: FIXED_BID_NO,
+    // ★ここに固定入札番号を入れる★
+    BID_NO: "2026003",
 
-    // [BID-01-02-02] bids/{bidNo}/offers のサブコレクション名
-    OFFERS_SUBCOL: "offers",
+    // 入札認証（備考5）
+    MSG_AUTH_PROMPT: "認証コードを入力してください。",
 
-    // [BID-01-02-03] bids ドキュメント内の備考キー定義（operator側と整合）
+    // Firebase Auth：入札者ID → email化
+    AUTH_EMAIL_DOMAIN: "bid.local",
+
+    // bids の備考キー
     NOTE_KEYS: {
       note1: "note1",
       note2: "note2",
       note3: "note3",
       note4: "note4",
-      note5: "note5",     // 認証コード（非表示）
-      legacyNote: "note"  // 旧データ互換
+      note5: "note5",
+      legacyNote: "note"
     },
 
-    // [BID-01-02-04] ステータス表示ラベル
     STATUS_LABELS: {
       draft: "draft（準備中）",
       open: "open（入札中）",
       closed: "closed（終了）"
     },
 
-    // [BID-01-02-05] メッセージ文言（要件により統一）
-    MSG_AUTH_PROMPT: "認証コードを入力してください。"
+    OFFERS_SUBCOL: "offers"
   };
 
+  // version log（03_log.js が先に来る場合もあるので安全に）
+  try { if (BID.Log && BID.Log.ver) BID.Log.ver("01_bidder_config.js", "v20260123-01"); } catch (e) {}
 })(window);
