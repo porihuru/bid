@@ -1,36 +1,55 @@
-// [JST 2026-01-23 22:30] js/01_bidder_config.js v20260123-01
-// [BID-01] 設定（入札番号固定・ログイン方式）
+// [JST 2026-01-24 21:00] bidder/js/01_bidder_config.js v20260124-01
+// [BID-01] 設定（入札番号固定・文言・Authメール化ルール）
 (function (global) {
   var BID = global.BID = global.BID || {};
-  BID.CONFIG = {
-    // ★ここに固定入札番号を入れる★
-    BID_NO: "2026003",
+  BID.CONFIG = BID.CONFIG || {};
 
-    // 入札認証（備考5）
-    MSG_AUTH_PROMPT: "認証コードを入力してください。",
+  if (BID.Build && BID.Build.register) BID.Build.register("01_bidder_config.js", "v20260124-01");
 
-    // Firebase Auth：入札者ID → email化
-    AUTH_EMAIL_DOMAIN: "bid.local",
+  // =========================================================
+  // [BID-01-01] 固定：この入札にだけ参加させる
+  // ここに入札番号を入れる
+  // =========================================================
+  BID.CONFIG.BID_NO = "2026003"; // ← ここを案件ごとに変更
 
-    // bids の備考キー
-    NOTE_KEYS: {
-      note1: "note1",
-      note2: "note2",
-      note3: "note3",
-      note4: "note4",
-      note5: "note5",
-      legacyNote: "note"
-    },
+  // =========================================================
+  // [BID-01-02] 入札認証（備考5）
+  // =========================================================
+  BID.CONFIG.MSG_AUTH_PROMPT = "認証コードを入力してください。";
 
-    STATUS_LABELS: {
-      draft: "draft（準備中）",
-      open: "open（入札中）",
-      closed: "closed（終了）"
-    },
-
-    OFFERS_SUBCOL: "offers"
+  // =========================================================
+  // [BID-01-03] ステータス表示
+  // =========================================================
+  BID.CONFIG.STATUS_LABELS = {
+    draft: "draft（準備中）",
+    open: "open（入札中）",
+    closed: "closed（終了）"
   };
 
-  // version log（03_log.js が先に来る場合もあるので安全に）
-  try { if (BID.Log && BID.Log.ver) BID.Log.ver("01_bidder_config.js", "v20260123-01"); } catch (e) {}
+  // =========================================================
+  // [BID-01-04] 備考キー（Firestoreのbids/{bidNo}のフィールド名）
+  //  - 旧: note
+  //  - 新: note1..note5
+  // =========================================================
+  BID.CONFIG.NOTE_KEYS = {
+    note1: "note1",
+    note2: "note2",
+    note3: "note3",
+    note4: "note4",
+    note5: "note5",
+    legacyNote: "note"
+  };
+
+  // =========================================================
+  // [BID-01-05] offers サブコレクション名
+  // =========================================================
+  BID.CONFIG.OFFERS_SUBCOL = "offers";
+
+  // =========================================================
+  // [BID-01-06] Firebase Email/Password を「入札者ID」で扱うためのルール
+  // 例: 入札者ID=332b001 → email=332b001@bid.local
+  // ※ Firebase側に事前登録するメールは、この形にしておく
+  // =========================================================
+  BID.CONFIG.LOGIN_EMAIL_SUFFIX = "@bid.local";
+
 })(window);
