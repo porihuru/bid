@@ -1,46 +1,25 @@
-// [JST 2026-01-24 21:00] bidder/js/00_bidder_build.js v20260124-01
-// [BID-00] ビルド情報・バージョン登録/出力（最初に読む）
-// 目的:
-//  - 各JSの先頭で register(file, ver) できるようにする
-//  - 03_bidder_log.js が読み込まれる前でも登録できる（バッファ）
-//  - ログが使えるようになったら一括で [ver] を出す
+/* [JST 2026-01-24 21:00]  00_bidder_build.js v20260124-01
+   目的:
+     - ビルド生成物ではなく「共通の起動前初期化」を置く場所として復活
+     - __APP_VER__（バージョン一覧）格納
+     - [ver] ログ出力（log未初期化でもconsoleに落とす）
+*/
+(function(){
+  var FILE = "00_bidder_build.js";
+  var VER  = "v20260124-01";
+  var TS   = new Date().toISOString();
 
-(function (global) {
-  var BID = global.BID = global.BID || {};
-  BID.Build = BID.Build || {};
+  function safeConsole(tag, msg){
+    try{ console.log("[" + tag + "] " + msg); }catch(e){}
+  }
 
-  // [BID-00-01] build情報
-  BID.Build.BUILD = {
-    builtAtJst: "2026-01-24 21:00",
-    buildVer: "v20260124-01"
-  };
+  // 先に一覧コンテナ確保
+  if(!window.__APP_VER__){ window.__APP_VER__ = []; }
+  window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
 
-  // [BID-00-02] バージョン登録バッファ
-  var buf = [];   // {file, ver, at}
+  // log未初期化想定
+  safeConsole("ver", TS + " " + FILE + " " + VER);
 
-  function nowIso() { return new Date().toISOString(); }
-
-  // [BID-00-03] register
-  BID.Build.register = function (file, ver) {
-    buf.push({ file: String(file || ""), ver: String(ver || ""), at: nowIso() });
-
-    // 既にログがあるなら即出力
-    try {
-      if (BID.Log && BID.Log.write) {
-        BID.Log.write("[ver] " + nowIso() + " " + file + " " + ver);
-      }
-    } catch (e) {}
-  };
-
-  // [BID-00-04] flush（ログが使えるようになったらまとめて出す）
-  BID.Build.flush = function () {
-    try {
-      if (!(BID.Log && BID.Log.write)) return;
-      for (var i = 0; i < buf.length; i++) {
-        var r = buf[i];
-        BID.Log.write("[ver] " + r.at + " " + r.file + " " + r.ver);
-      }
-    } catch (e) {}
-  };
-
-})(window);
+  // アプリ名前空間（必要ならここに共通関数を置く）
+  if(!window.BidderApp){ window.BidderApp = {}; }
+})();
