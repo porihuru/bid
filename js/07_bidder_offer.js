@@ -1,206 +1,106 @@
-// [JST 2026-01-23 22:30] js/07_bidder_offer.js v20260123-01
-// [BID-07] offers：単価のUI反映／payload生成
+// [JST 2026-01-24 21:00] bidder/js/07_bidder_offer.js v20260124-01
+// [BID-07] offers: 単価入力の収集・反映・payload生成
 (function (global) {
   var BID = global.BID = global.BID || {};
+  if (BID.Build && BID.Build.register) BID.Build.register("07_bidder_offer.js", "v20260124-01");
 
-  function el(id){ return document.getElementById(id); }
-  function trim(s){ return (s==null) ? "" : String(s).replace(/^\s+|\s+$/g,""); }
+  function el(id) { return document.getElementById(id); }
 
-  function toNumberOrNaN(s){
+  function trim(s) { return (s == null) ? "" : String(s).replace(/^\s+|\s+$/g, ""); }
+
+  function toNumberOrNull(s) {
     s = trim(s);
-    if (!s) return NaN;
+    if (!s) return null;
     // カンマ除去
-    s = s.replace(/,/g,"");
-    // 数値のみ許可（整数/小数）
+    s = s.replace(/,/g, "");
     if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
     return Number(s);
   }
 
-  // Cookieは profile（会社情報等）だけ持つ（単価はFirestore側）
-  var CK = {
-    bidderId: "BIDDER_bidderId",
-    email: "BIDDER_email",
-    address: "BIDDER_address",
-    companyName: "BIDDER_companyName",
-    representativeName: "BIDDER_representativeName",
-    contactName: "BIDDER_contactName",
-    contactInfo: "BIDDER_contactInfo"
-  };
+  BID.Offer = BID.Offer || {};
 
-  function setCookie(k, v, days) {
-    var d = new Date();
-    d.setTime(d.getTime() + (days || 365) * 24 * 60 * 60 * 1000);
-    document.cookie = k + "=" + encodeURIComponent(v || "") + "; expires=" + d.toUTCString() + "; path=/";
-  }
-  function getCookie(k) {
-    var name = k + "=";
-    var ca = document.cookie.split(";");
-    for (var i = 0; i < ca.length; i++) {
-      var c = ca[i];
-      while (c.charAt(0) === " ") c = c.substring(1);
-      if (c.indexOf(name) === 0) return decodeURIComponent(c.substring(name.length, c.length));
-    }
-    return "";
-  }
-  function delCookie(k) {
-    document.cookie = k + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/";
-  }
-
-  BID.Offer = {
-    // 既存単価をテーブルへ反映
-    applyLinesToTable: function (lines) {
-      lines = lines || {};
-      var st = BID.State.get();
-      var items = st.items || [];
-      for (var i = 0; i < items.length; i++) {
-        var seq = String(items[i].seq);
-        var v = (lines[seq] != null) ? String(lines[seq]) : "";
-        var inp = el("unitPrice_" + seq);
-        if (inp) inp.value = v;
-      }
-      BID.Log.write("[offer] applyLinesToTable OK");
-    },
-
-    // テーブルから単価を読む
-    readLinesFromTable: function () {
-      var st = BID.State.get();
-      var items = st.items || [];
-      var lines = {};
-      for (var i = 0; i < items.length; i++) {
-        var seq = String(items[i].seq);
-        var inp = el("unitPrice_" + seq);
-        var raw = inp ? String(inp.value || "") : "";
-        lines[seq] = raw;
-      }
-      return lines;
-    },
-
-    // profile 読み取り（必須6+入札者番号）
-    readProfileFromInputs: function () {
-      return {
-        bidderId: trim(el("inpBidderId") ? el("inpBidderId").value : ""),
-        email: trim(el("inpEmail") ? el("inpEmail").value : ""),
-        address: trim(el("inpAddress") ? el("inpAddress").value : ""),
-        companyName: trim(el("inpCompanyName") ? el("inpCompanyName").value : ""),
-        representativeName: trim(el("inpRepresentativeName") ? el("inpRepresentativeName").value : ""),
-        contactName: trim(el("inpContactName") ? el("inpContactName").value : ""),
-        contactInfo: trim(el("inpContactInfo") ? el("inpContactInfo").value : "")
-      };
-    },
-
-    // 必須チェック（戻り値：未入力項目名配列）
-    validateRequired: function (p) {
-      var miss = [];
-      if (!p.bidderId) miss.push("入札者番号");
-      if (!p.email) miss.push("メールアドレス");
-      if (!p.address) miss.push("住所");
-      if (!p.companyName) miss.push("会社名");
-      if (!p.representativeName) miss.push("代表者名");
-      if (!p.contactName) miss.push("担当者名");
-      if (!p.contactInfo) miss.push("担当者・連絡先");
-      return miss;
-    },
-
-    // Cookie（profileのみ）
-    saveProfileToCookie: function (p) {
-      setCookie(CK.bidderId, p.bidderId, 365);
-      setCookie(CK.email, p.email, 365);
-      setCookie(CK.address, p.address, 365);
-      setCookie(CK.companyName, p.companyName, 365);
-      setCookie(CK.representativeName, p.representativeName, 365);
-      setCookie(CK.contactName, p.contactName, 365);
-      setCookie(CK.contactInfo, p.contactInfo, 365);
-      BID.Log.write("[cookie] save OK");
-    },
-
-    loadProfileFromCookie: function () {
-      return {
-        bidderId: getCookie(CK.bidderId),
-        email: getCookie(CK.email),
-        address: getCookie(CK.address),
-        companyName: getCookie(CK.companyName),
-        representativeName: getCookie(CK.representativeName),
-        contactName: getCookie(CK.contactName),
-        contactInfo: getCookie(CK.contactInfo)
-      };
-    },
-
-    clearProfileCookie: function () {
-      delCookie(CK.bidderId);
-      delCookie(CK.email);
-      delCookie(CK.address);
-      delCookie(CK.companyName);
-      delCookie(CK.representativeName);
-      delCookie(CK.contactName);
-      delCookie(CK.contactInfo);
-      BID.Log.write("[cookie] clear OK");
-    },
-
-    applyProfileToInputs: function (p) {
-      if (el("inpBidderId")) el("inpBidderId").value = p.bidderId || "";
-      if (el("inpEmail")) el("inpEmail").value = p.email || "";
-      if (el("inpAddress")) el("inpAddress").value = p.address || "";
-      if (el("inpCompanyName")) el("inpCompanyName").value = p.companyName || "";
-      if (el("inpRepresentativeName")) el("inpRepresentativeName").value = p.representativeName || "";
-      if (el("inpContactName")) el("inpContactName").value = p.contactName || "";
-      if (el("inpContactInfo")) el("inpContactInfo").value = p.contactInfo || "";
-    },
-
-    // 保存payload生成（失敗理由は必ず画面に出す）
-    buildOfferPayload: function () {
-      var st = BID.State.get();
-      var p = BID.Offer.readProfileFromInputs();
-
-      // bidderId はログインIDと一致させる（事故防止）
-      if (!st.bidderId) {
-        BID.Render.setError("保存できません：ログイン状態を確認してください（入札者IDが未設定）。");
-        BID.Log.write("[payload] NG: st.bidderId empty");
-        return null;
-      }
-      p.bidderId = st.bidderId;
-      if (el("inpBidderId")) el("inpBidderId").value = st.bidderId;
-
-      var miss = BID.Offer.validateRequired(p);
-      if (miss.length) {
-        BID.Render.setError("保存できません：必須未入力（" + miss.join(" / ") + "）");
-        BID.Log.write("[payload] NG: missing " + miss.join(","));
-        return null;
-      }
-
-      // 単価チェック：全品目必須（運用上確実）
-      var rawLines = BID.Offer.readLinesFromTable();
-      var items = st.items || [];
-      var lines = {};
-      for (var i = 0; i < items.length; i++) {
-        var seq = String(items[i].seq);
-        var n = toNumberOrNaN(rawLines[seq]);
-        if (isNaN(n)) {
-          BID.Render.setError("保存できません：単価が未入力または不正です（seq=" + seq + "）");
-          BID.Log.write("[payload] NG: price invalid seq=" + seq + " raw=" + (rawLines[seq]||""));
-          return null;
-        }
-        lines[seq] = String(n);
-      }
-
-      // 返却payload
-      var doc = {
-        bidderId: st.bidderId,
-        profile: {
-          bidderId: p.bidderId,
-          email: p.email,
-          address: p.address,
-          companyName: p.companyName,
-          representativeName: p.representativeName,
-          contactName: p.contactName,
-          contactInfo: p.contactInfo
-        },
-        lines: lines
-      };
-
-      BID.Log.write("[payload] OK");
-      return doc;
+  // [07-01] 既存linesをテーブルへ反映
+  BID.Offer.applyLinesToTable = function (lines) {
+    lines = lines || {};
+    var st = BID.State.get();
+    var items = st.items || [];
+    for (var i = 0; i < items.length; i++) {
+      var seq = String(items[i].seq);
+      var inp = el("unitPrice_" + seq);
+      if (!inp) continue;
+      var v = (lines[seq] != null) ? String(lines[seq]) : "";
+      inp.value = v;
     }
   };
 
-  try { if (BID.Log && BID.Log.ver) BID.Log.ver("07_bidder_offer.js", "v20260123-01"); } catch (e) {}
+  // [07-02] テーブルからlinesを収集（{seq: unitPrice}）
+  BID.Offer.collectLinesFromTable = function () {
+    var st = BID.State.get();
+    var items = st.items || [];
+    var out = {};
+    for (var i = 0; i < items.length; i++) {
+      var seq = String(items[i].seq);
+      var inp = el("unitPrice_" + seq);
+      var v = inp ? inp.value : "";
+      var num = toNumberOrNull(v);
+
+      if (num === null) {
+        // 未入力は入れない（保存は許可するが、後段で必須にするなら変更）
+        continue;
+      }
+      if (isNaN(num)) {
+        return { error: "単価が数値ではありません（seq=" + seq + "）", lines: null };
+      }
+      out[seq] = num;
+    }
+    return { error: "", lines: out };
+  };
+
+  // [07-03] 保存payload生成（必須/単価チェック）
+  BID.Offer.buildOfferPayload = function () {
+    var st = BID.State.get();
+
+    // bidderId（入札者番号）
+    var bidderId = st.bidderNo || "";
+    if (!bidderId) {
+      if (BID.Render) BID.Render.setError("入札者IDが確定していません。ログインをやり直してください。");
+      if (BID.Log) BID.Log.write("[payload] NG: bidderId empty");
+      return null;
+    }
+
+    // profile
+    var p = BID.Profile.readFromInputs();
+    var miss = BID.Profile.validateRequired(p);
+    if (miss.length) {
+      if (BID.Render) BID.Render.setError("入札者情報（必須）が未入力です: " + miss.join(" / "));
+      if (BID.Log) BID.Log.write("[payload] NG: profile incomplete");
+      return null;
+    }
+
+    // lines
+    var r = BID.Offer.collectLinesFromTable();
+    if (r.error) {
+      if (BID.Render) BID.Render.setError(r.error);
+      if (BID.Log) BID.Log.write("[payload] NG: " + r.error);
+      return null;
+    }
+
+    // ここで「単価の必須」を強制したいならチェックを追加
+    // 例：全品必須の場合は items.length と入力数の一致を要求する等
+
+    return {
+      bidderId: bidderId,
+      bidderNo: bidderId, // 同一
+      profile: {
+        email: p.email,
+        address: p.address,
+        companyName: p.companyName,
+        representativeName: p.representativeName,
+        contactName: p.contactName,
+        contactInfo: p.contactInfo
+      },
+      lines: r.lines || {}
+    };
+  };
+
 })(window);
