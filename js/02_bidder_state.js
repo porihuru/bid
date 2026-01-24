@@ -1,45 +1,31 @@
-// [JST 2026-01-22 22:05] bidder/js/02_bidder_state.js v20260122-01
-// [BID-02] 状態管理（bidNo固定・ログイン不要対応）
-//
-// 目的:
-//  - CONFIGのBID_NOを確実にstateへ取り込み「未設定」を潰す
-//  - 認証状態や入力可否などを一元管理する
-//
-// 依存:
-//  - js/01_bidder_config.js が先に読み込まれていること（BID.CONFIG.BID_NO）
-//
-// 変更履歴:
-//  - [BID-02-10] initBidNo() で BID_NO を確実に取り込み、未設定なら画面エラー＆ログ
-//  - [BID-02-11] setBid() で bidStatus を state に必ず反映（status未読込問題の対策）
-//  - [BID-02-13] setOffer() で offer.lines を offerLines に展開（table反映用）
-
+// [JST 2026-01-23 22:30] js/02_bidder_state.js v20260123-01
+// [BID-02] 状態管理（ログイン→認証→入力）
 (function (global) {
-  "use strict";
-
   var BID = global.BID = global.BID || {};
 
-  // =========================================================
-  // [BID-02-01] 内部state（単一ソース）
-  // =========================================================
   var state = {
-    // [BID-02-01-01] 固定入札番号（CONFIGからセット）
     bidNo: "",
 
-    // [BID-02-01-02] 入札データ（bids/{bidNo}）
+    // firebase user
+    user: null,
+    loginState: "SIGNED_OUT", // SIGNED_OUT / SIGNED_IN
+
+    // bidderId（=入札者ID）
+    bidderId: "",
+
+    // bid/items
     bid: null,
     bidStatus: "",
-
-    // [BID-02-01-03] 品目（bids/{bidNo}/items）
     items: [],
 
-    // [BID-02-01-04] 入札者の保存データ（bids/{bidNo}/offers/{bidderId}）
+    // offer
     offer: null,
     offerLines: {},
 
-    // [BID-02-01-05] 認証状態
-    authState: "LOCKED", // LOCKED / UNLOCKED
+    // auth
+    authState: "LOCKED",
 
-    // [BID-02-01-06] 入札者情報（Cookie or offers から復元）
+    // profile
     profile: {
       bidderId: "",
       email: "",
@@ -49,101 +35,72 @@
       contactName: "",
       contactInfo: ""
     },
-    profileState: "INCOMPLETE", // INCOMPLETE / COMPLETE
+    profileState: "INCOMPLETE",
 
-    // [BID-02-01-07] 画面モード
-    viewOnly: false,      // closed なら true
-    inputEnabled: false,  // open + UNLOCKED + profile COMPLETE の時のみ true
+    // mode
+    viewOnly: false,
+    inputEnabled: false,
 
-    // [BID-02-01-08] 時刻（表示用）
+    // times
     lastLoadedAt: "",
     lastSavedAt: ""
   };
 
-  // =========================================================
-  // [BID-02-02] セーフログ／セーフ表示（失敗しても止めない）
-  // =========================================================
-  function safeLog(msg) {
-    try { if (BID.Log && BID.Log.write) BID.Log.write(msg); } catch (e) {}
-  }
-  function safeError(msg) {
-    try { if (BID.Render && BID.Render.setError) BID.Render.setError(msg); } catch (e) {}
-  }
+  function safeLog(s) { try { if (BID.Log && BID.Log.write) BID.Log.write(s); } catch (e) {} }
 
-  // =========================================================
-  // [BID-02-03] API
-  // =========================================================
   BID.State = {
-    // [BID-02-03-01] getter
     get: function () { return state; },
 
-    // =======================================================
-    // [BID-02-10] bidNo 初期化（CONFIGから固定値を読む）
-    // - 未設定なら即エラー＆ログ（要求: ダメならエラーを返す）
-    // =======================================================
     initBidNo: function () {
       var fromConfig = (BID.CONFIG && BID.CONFIG.BID_NO) ? String(BID.CONFIG.BID_NO) : "";
       state.bidNo = fromConfig;
-
       if (!state.bidNo) {
-        safeError("入札番号が未設定です。js/01_bidder_config.js の BID.CONFIG.BID_NO を設定してください。");
-        safeLog("[config] ERROR: BID_NO is empty. check js/01_bidder_config.js and script load order.");
+        safeLog("[config] ERROR: BID_NO empty (js/01_bidder_config.js)");
       } else {
         safeLog("[config] BID_NO=" + state.bidNo);
       }
     },
 
-    // =======================================================
-    // [BID-02-11] bid セット（bids/{bidNo}）
-    // - ★重要：bidStatus を必ず展開して保持（「未読込」表示対策）
-    // =======================================================
+    setUser: function (user) {
+      state.user = user || null;
+      state.loginState = user ? "SIGNED_IN" : "SIGNED_OUT";
+      safeLog("[state] setUser: " + (user ? ("SIGNED_IN uid=" + user.uid) : "SIGNED_OUT"));
+    },
+
+    setBidderId: function (bidderId) {
+      state.bidderId = bidderId || "";
+      safeLog("[state] setBidderId: " + (state.bidderId || "(empty)"));
+    },
+
+    // bid/items
     setBid: function (bid) {
       state.bid = bid || null;
-      state.bidStatus = (bid && bid.status != null) ? String(bid.status) : "";
-      safeLog("[state] setBid: status=" + (state.bidStatus || "(empty)"));
+      state.bidStatus = (bid && bid.status) ? String(bid.status) : "";
+      safeLog("[state] setBid: status=" + (state.bidStatus || "(none)"));
     },
-
-    // =======================================================
-    // [BID-02-12] items セット
-    // =======================================================
     setItems: function (items) {
       state.items = items || [];
-      safeLog("[state] setItems: count=" + state.items.length);
+      safeLog("[state] setItems: " + state.items.length);
     },
 
-    // =======================================================
-    // [BID-02-13] offer セット
-    // - offer.lines を offerLines に展開（テーブル反映用）
-    // =======================================================
+    // offer
     setOffer: function (offer) {
       state.offer = offer || null;
-      try {
-        state.offerLines = (offer && offer.lines) ? offer.lines : {};
-      } catch (e) {
-        state.offerLines = {};
-      }
-      safeLog("[state] setOffer: hasOffer=" + (!!state.offer) + " lines=" + Object.keys(state.offerLines || {}).length);
+      try { state.offerLines = (offer && offer.lines) ? offer.lines : {}; } catch (e) { state.offerLines = {}; }
+      safeLog("[state] setOffer: " + (offer ? "exists" : "null"));
     },
-
-    // =======================================================
-    // [BID-02-14] offerLines セット（テーブル入力から作った lines を保持）
-    // =======================================================
     setOfferLines: function (lines) {
       state.offerLines = lines || {};
-      safeLog("[state] setOfferLines: keys=" + Object.keys(state.offerLines || {}).length);
+      safeLog("[state] setOfferLines");
     },
 
-    // =======================================================
-    // [BID-02-15] 認証状態
-    // =======================================================
+    // auth
     setAuthState: function (s) {
       state.authState = s || "LOCKED";
       safeLog("[state] setAuthState: " + state.authState);
     },
 
-    // =======================================================
-    // [BID-02-16] プロファイル（入力欄→state）
-    // =======================================================
+    // profile
     setProfile: function (p) {
       p = p || {};
       state.profile.bidderId = (p.bidderId != null) ? String(p.bidderId) : "";
@@ -156,41 +113,25 @@
       safeLog("[state] setProfile: bidderId=" + (state.profile.bidderId || "(empty)"));
     },
 
-    // =======================================================
-    // [BID-02-17] profileState
-    // =======================================================
     setProfileState: function (s) {
       state.profileState = s || "INCOMPLETE";
       safeLog("[state] setProfileState: " + state.profileState);
     },
 
-    // =======================================================
-    // [BID-02-18] viewOnly（closed時にtrue）
-    // =======================================================
+    // mode
     setViewOnly: function (yes) {
       state.viewOnly = !!yes;
       safeLog("[state] setViewOnly: " + (state.viewOnly ? "true" : "false"));
     },
-
-    // =======================================================
-    // [BID-02-19] inputEnabled（保存可否）
-    // =======================================================
     setInputEnabled: function (yes) {
       state.inputEnabled = !!yes;
       safeLog("[state] setInputEnabled: " + (state.inputEnabled ? "true" : "false"));
     },
 
-    // =======================================================
-    // [BID-02-20] lastLoadedAt / lastSavedAt
-    // =======================================================
-    setLastLoadedAt: function (iso) {
-      state.lastLoadedAt = iso || "";
-      safeLog("[state] setLastLoadedAt: " + (state.lastLoadedAt || "(empty)"));
-    },
-    setLastSavedAt: function (iso) {
-      state.lastSavedAt = iso || "";
-      safeLog("[state] setLastSavedAt: " + (state.lastSavedAt || "(empty)"));
-    }
+    // times
+    setLastLoadedAt: function (iso) { state.lastLoadedAt = iso || ""; },
+    setLastSavedAt: function (iso) { state.lastSavedAt = iso || ""; }
   };
 
+  try { if (BID.Log && BID.Log.ver) BID.Log.ver("02_bidder_state.js", "v20260123-01"); } catch (e) {}
 })(window);
