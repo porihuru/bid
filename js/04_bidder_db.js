@@ -1,12 +1,14 @@
-// [JST 2026-01-23 22:30] js/04_bidder_db.js v20260123-01
-// [BID-04] Firestore I/O
+// [JST 2026-01-24 21:00] bidder/js/04_bidder_db.js v20260124-01
+// [BID-04] Firestoreアクセス（bids / items / offers / note1-5）
 (function (global) {
   var BID = global.BID = global.BID || {};
+  if (BID.Build && BID.Build.register) BID.Build.register("04_bidder_db.js", "v20260124-01");
 
   function hasFirebase() {
     return (typeof firebase !== "undefined") && firebase.auth && firebase.firestore;
   }
-  function nowIso(){ return new Date().toISOString(); }
+
+  function nowIso() { return new Date().toISOString(); }
 
   function getNote(bid, key) {
     if (!bid) return "";
@@ -14,54 +16,71 @@
   }
 
   BID.DB = {
+    // [04-01] 前提チェック
     ensure: function () {
-      if (!hasFirebase()) throw new Error("Firebaseが初期化されていません（compatの読み込み順を確認）。");
+      if (!hasFirebase()) {
+        throw new Error("Firebaseが初期化されていません（firebase auth/firestore が見つかりません）。");
+      }
     },
 
-    auth: function () {
+    // [04-02] 認証監視
+    onAuthStateChanged: function (cb) {
       BID.DB.ensure();
-      return firebase.auth();
+      return firebase.auth().onAuthStateChanged(cb);
     },
 
-    fs: function () {
+    // [04-03] ログイン
+    signInWithBidderId: function (bidderId, password) {
       BID.DB.ensure();
-      return firebase.firestore();
+      var suffix = (BID.CONFIG && BID.CONFIG.LOGIN_EMAIL_SUFFIX) ? String(BID.CONFIG.LOGIN_EMAIL_SUFFIX) : "@bid.local";
+      var email = String(bidderId || "") + suffix;
+      return firebase.auth().signInWithEmailAndPassword(email, String(password || ""));
     },
 
-    // bids/{bidNo}
+    // [04-04] ログアウト
+    signOut: function () {
+      BID.DB.ensure();
+      return firebase.auth().signOut();
+    },
+
+    // [04-05] bids/{bidNo}
     getBid: function (bidNo) {
-      return BID.DB.fs().collection("bids").doc(String(bidNo)).get().then(function (snap) {
-        if (!snap.exists) return null;
-        return snap.data();
-      });
-    },
-
-    // bids/{bidNo}/items
-    getItems: function (bidNo) {
-      return BID.DB.fs().collection("bids").doc(String(bidNo)).collection("items").get().then(function (qs) {
-        var arr = [];
-        qs.forEach(function (doc) {
-          var d = doc.data() || {};
-          arr.push(d);
-        });
-        arr.sort(function (a, b) { return Number(a.seq) - Number(b.seq); });
-        return arr;
-      });
-    },
-
-    // offers
-    getOffer: function (bidNo, bidderId) {
-      var sub = BID.CONFIG.OFFERS_SUBCOL || "offers";
-      return BID.DB.fs().collection("bids").doc(String(bidNo)).collection(sub).doc(String(bidderId)).get()
+      BID.DB.ensure();
+      return firebase.firestore().collection("bids").doc(String(bidNo)).get()
         .then(function (snap) {
           if (!snap.exists) return null;
           return snap.data();
         });
     },
 
-    upsertOffer: function (bidNo, bidderId, payload) {
+    // [04-06] bids/{bidNo}/items（seq昇順）
+    getItems: function (bidNo) {
+      BID.DB.ensure();
+      return firebase.firestore().collection("bids").doc(String(bidNo)).collection("items").get()
+        .then(function (qs) {
+          var arr = [];
+          qs.forEach(function (doc) { arr.push(doc.data() || {}); });
+          arr.sort(function (a, b) { return Number(a.seq) - Number(b.seq); });
+          return arr;
+        });
+    },
+
+    // [04-07] offers 読込: bids/{bidNo}/offers/{bidderNo}
+    getOffer: function (bidNo, bidderNo) {
+      BID.DB.ensure();
       var sub = BID.CONFIG.OFFERS_SUBCOL || "offers";
-      var ref = BID.DB.fs().collection("bids").doc(String(bidNo)).collection(sub).doc(String(bidderId));
+      return firebase.firestore().collection("bids").doc(String(bidNo)).collection(sub).doc(String(bidderNo)).get()
+        .then(function (snap) {
+          if (!snap.exists) return null;
+          return snap.data();
+        });
+    },
+
+    // [04-08] offers 上書き保存（rulesで open のみ許可）
+    upsertOffer: function (bidNo, bidderNo, payload) {
+      BID.DB.ensure();
+      var sub = BID.CONFIG.OFFERS_SUBCOL || "offers";
+      var ref = firebase.firestore().collection("bids").doc(String(bidNo)).collection(sub).doc(String(bidderNo));
 
       return ref.get().then(function (snap) {
         var exists = snap.exists;
@@ -74,9 +93,6 @@
           } catch (e) {}
         }
         base.updatedAt = nowIso();
-        base.bidNo = String(bidNo);
-        base.bidderId = String(bidderId);
-        base.updatedByUid = (BID.DB.auth().currentUser && BID.DB.auth().currentUser.uid) ? BID.DB.auth().currentUser.uid : "";
 
         return ref.set(base, { merge: true }).then(function () {
           return { ok: true, exists: exists };
@@ -84,16 +100,15 @@
       });
     },
 
-    // 認証コード（備考5）
+    // [04-09] note5（認証コード）取得（旧noteフォールバック）
     getAuthCodeFromBid: function (bidDoc) {
       var k = (BID.CONFIG && BID.CONFIG.NOTE_KEYS) ? BID.CONFIG.NOTE_KEYS : {};
       var code = getNote(bidDoc, k.note5 || "note5");
       if (code) return code;
-      var legacy = getNote(bidDoc, k.legacyNote || "note");
-      return legacy || "";
+      return getNote(bidDoc, k.legacyNote || "note") || "";
     },
 
-    // 公開備考1-4
+    // [04-10] note1-4 表示用（旧noteしかない場合はnote1へ寄せる）
     getPublicNotesFromBid: function (bidDoc) {
       var k = (BID.CONFIG && BID.CONFIG.NOTE_KEYS) ? BID.CONFIG.NOTE_KEYS : {};
       var n1 = getNote(bidDoc, k.note1 || "note1");
@@ -105,5 +120,4 @@
     }
   };
 
-  try { if (BID.Log && BID.Log.ver) BID.Log.ver("04_bidder_db.js", "v20260123-01"); } catch (e) {}
 })(window);
