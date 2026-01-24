@@ -1,107 +1,98 @@
-// [JST 2026-01-24 21:00] bidder/js/06_bidder_profile.js v20260124-01
-// [BID-06] 入札者情報（必須6項目）+ Cookie
-(function (global) {
-  var BID = global.BID = global.BID || {};
-  if (BID.Build && BID.Build.register) BID.Build.register("06_bidder_profile.js", "v20260124-01");
+/* [JST 2026-01-24 21:00]  06_bidder_profile.js v20260124-01 */
+(function(){
+  var FILE = "06_bidder_profile.js";
+  var VER  = "v20260124-01";
+  var TS   = new Date().toISOString();
 
-  BID.Profile = BID.Profile || {};
+  function L(tag, msg){
+    if(window.BidderLog && window.BidderLog.write) window.BidderLog.write(tag, msg);
+    else if(window.log) window.log(tag, msg);
+    else try{ console.log("[" + tag + "] " + msg); }catch(e){}
+  }
+  if(!window.__APP_VER__){ window.__APP_VER__ = []; }
+  window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
+  L("ver", TS + " " + FILE + " " + VER);
 
-  // [06-01] Cookie key
-  var CK = {
-    email: "BIDDER_email",
-    address: "BIDDER_address",
-    companyName: "BIDDER_companyName",
-    representativeName: "BIDDER_representativeName",
-    contactName: "BIDDER_contactName",
-    contactInfo: "BIDDER_contactInfo"
-  };
+  function _getCookie(name){
+    var m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+    return m ? decodeURIComponent(m[2]) : null;
+  }
 
-  function setCookie(k, v, days) {
+  function _setCookie(name, value, days){
     var d = new Date();
-    d.setTime(d.getTime() + (days || 365) * 24 * 60 * 60 * 1000);
-    document.cookie = k + "=" + encodeURIComponent(v || "") + "; expires=" + d.toUTCString() + "; path=/";
+    d.setTime(d.getTime() + (days*24*60*60*1000));
+    document.cookie = name + "=" + encodeURIComponent(value) + ";expires=" + d.toUTCString() + ";path=/";
   }
-  function getCookie(k) {
-    var name = k + "=";
-    var ca = document.cookie.split(";");
-    for (var i = 0; i < ca.length; i++) {
-      var c = ca[i];
-      while (c.charAt(0) === " ") c = c.substring(1);
-      if (c.indexOf(name) === 0) return decodeURIComponent(c.substring(name.length, c.length));
+
+  function _delCookie(name){
+    document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+  }
+
+  function readProfileFromUI(){
+    // [PF-01] UI -> state.profile
+    function v(id){ var el=document.getElementById(id); return el? (el.value||"") : ""; }
+    return {
+      email:   v("pEmail"),
+      address: v("pAddress"),
+      company: v("pCompany"),
+      rep:     v("pRep"),
+      person:  v("pPerson"),
+      tel:     v("pTel")
+    };
+  }
+
+  function writeProfileToUI(p){
+    // [PF-02] state.profile -> UI
+    p = p || {};
+    function s(id, val){ var el=document.getElementById(id); if(el){ el.value = val || ""; } }
+    s("pEmail",   p.email);
+    s("pAddress", p.address);
+    s("pCompany", p.company);
+    s("pRep",     p.rep);
+    s("pPerson",  p.person);
+    s("pTel",     p.tel);
+  }
+
+  function saveCookie(){
+    // [PF-03] Cookie保存
+    var p = readProfileFromUI();
+    window.BidderState.setProfile(p);
+    var ok = window.BidderState.computeProfileState();
+    _setCookie(window.BidderConfig.COOKIE_KEYS.profile, JSON.stringify(p), 365);
+    L("cookie", "save OK");
+    return ok;
+  }
+
+  function loadCookie(){
+    // [PF-04] Cookie読込
+    var raw = _getCookie(window.BidderConfig.COOKIE_KEYS.profile);
+    if(!raw){
+      L("cookie", "autofill none");
+      return null;
     }
-    return "";
+    try{
+      var p = JSON.parse(raw);
+      writeProfileToUI(p);
+      window.BidderState.setProfile(p);
+      window.BidderState.computeProfileState();
+      L("cookie", "autofill OK");
+      return p;
+    }catch(e){
+      L("cookie", "autofill FAILED");
+      return null;
+    }
   }
-  function delCookie(k) {
-    document.cookie = k + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/";
+
+  function deleteCookie(){
+    _delCookie(window.BidderConfig.COOKIE_KEYS.profile);
+    L("cookie", "deleted");
   }
 
-  function el(id) { return document.getElementById(id); }
-  function trim(s) { return (s == null) ? "" : String(s).replace(/^\s+|\s+$/g, ""); }
-
-  // [06-02] UIから取得
-  BID.Profile.readFromInputs = function () {
-    return {
-      email: trim(el("inpEmail") ? el("inpEmail").value : ""),
-      address: trim(el("inpAddress") ? el("inpAddress").value : ""),
-      companyName: trim(el("inpCompanyName") ? el("inpCompanyName").value : ""),
-      representativeName: trim(el("inpRepresentativeName") ? el("inpRepresentativeName").value : ""),
-      contactName: trim(el("inpContactName") ? el("inpContactName").value : ""),
-      contactInfo: trim(el("inpContactInfo") ? el("inpContactInfo").value : "")
-    };
+  window.BidderProfile = {
+    readProfileFromUI: readProfileFromUI,
+    writeProfileToUI: writeProfileToUI,
+    saveCookie: saveCookie,
+    loadCookie: loadCookie,
+    deleteCookie: deleteCookie
   };
-
-  // [06-03] 必須チェック（未入力項目名配列）
-  BID.Profile.validateRequired = function (p) {
-    var miss = [];
-    if (!p.email) miss.push("メール");
-    if (!p.address) miss.push("住所");
-    if (!p.companyName) miss.push("会社名");
-    if (!p.representativeName) miss.push("代表者名");
-    if (!p.contactName) miss.push("担当者名");
-    if (!p.contactInfo) miss.push("連絡先");
-    return miss;
-  };
-
-  // [06-04] Cookie
-  BID.Profile.saveToCookie = function (p) {
-    p = p || {};
-    setCookie(CK.email, p.email, 365);
-    setCookie(CK.address, p.address, 365);
-    setCookie(CK.companyName, p.companyName, 365);
-    setCookie(CK.representativeName, p.representativeName, 365);
-    setCookie(CK.contactName, p.contactName, 365);
-    setCookie(CK.contactInfo, p.contactInfo, 365);
-  };
-
-  BID.Profile.loadFromCookie = function () {
-    return {
-      email: getCookie(CK.email),
-      address: getCookie(CK.address),
-      companyName: getCookie(CK.companyName),
-      representativeName: getCookie(CK.representativeName),
-      contactName: getCookie(CK.contactName),
-      contactInfo: getCookie(CK.contactInfo)
-    };
-  };
-
-  BID.Profile.clearCookie = function () {
-    delCookie(CK.email);
-    delCookie(CK.address);
-    delCookie(CK.companyName);
-    delCookie(CK.representativeName);
-    delCookie(CK.contactName);
-    delCookie(CK.contactInfo);
-  };
-
-  // [06-05] UIへ反映
-  BID.Profile.applyToInputs = function (p) {
-    p = p || {};
-    if (el("inpEmail")) el("inpEmail").value = p.email || "";
-    if (el("inpAddress")) el("inpAddress").value = p.address || "";
-    if (el("inpCompanyName")) el("inpCompanyName").value = p.companyName || "";
-    if (el("inpRepresentativeName")) el("inpRepresentativeName").value = p.representativeName || "";
-    if (el("inpContactName")) el("inpContactName").value = p.contactName || "";
-    if (el("inpContactInfo")) el("inpContactInfo").value = p.contactInfo || "";
-  };
-
-})(window);
+})();
