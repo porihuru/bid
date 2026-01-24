@@ -1,146 +1,213 @@
-// [JST 2026-01-24 21:00] bidder/js/02_bidder_state.js v20260124-01
-// [BID-02] 状態管理（bidNo固定・ログイン→認証→入力可否）
-(function (global) {
-  var BID = global.BID = global.BID || {};
+/* [JST 2026-01-24 21:00]  02_bidder_state.js v20260124-01 */
+(function(){
+  var FILE = "02_bidder_state.js";
+  var VER  = "v20260124-01";
+  var TS   = new Date().toISOString();
 
-  if (BID.Build && BID.Build.register) BID.Build.register("02_bidder_state.js", "v20260124-01");
+  function safeLog(tag, msg){
+    try{
+      if(window.BidderLog && window.BidderLog.write){ window.BidderLog.write(tag, msg); }
+      else if(window.log){ window.log(tag, msg); }
+      else { console.log("[" + tag + "] " + msg); }
+    }catch(e){ try{ console.log("[" + tag + "] " + msg); }catch(ex){} }
+  }
+
+  if(!window.__APP_VER__){ window.__APP_VER__ = []; }
+  window.__APP_VER__.push({ ts: TS, file: FILE, ver: VER });
+  safeLog("ver", TS + " " + FILE + " " + VER);
+
+  // =========================
+  // [ST-01] 状態管理（レンダリング過多を防ぐため notify をまとめる）
+  // =========================
+  var _listeners = [];
+  var _notifyTimer = null;
 
   var state = {
-    // [02-01] 固定入札番号
-    bidNo: "",
+    bidNo: null,
 
-    // [02-02] Firebaseログイン状態
-    user: null,
-    loginState: "SIGNED-OUT", // SIGNED-OUT / SIGNED-IN
-    bidderId: "",             // 入札者ID（ユーザー入力）
-    bidderNo: "",             // 入札者番号（＝入札者ID）
+    // 認証・モード
+    loginState: "SIGNED-OUT",     // SIGNED-OUT / SIGNED-IN
+    authState:  "LOCKED",         // LOCKED / UNLOCKED
+    viewOnly:   false,
+    inputEnabled:false,
 
-    // [02-03] 入札データ
-    bid: null,
-    bidStatus: "",
+    // Firebase
+    user: null,                   // firebase.User or null
+    bidderId: null,               // 入札者ID（=入札者番号）
+    bidderEmail:null,
 
-    // [02-04] 品目
-    items: [],
+    // 読込データ
+    bid: null,                    // bids/{bidNo}
+    items: [],                    // 品目行
+    offer: null,                  // 保存済み（読み込みは必要に応じて）
+    offerLines: [],               // 入札単価の入力状態
 
-    // [02-05] offers（入札者の保存データ）
-    offer: null,
-    offerLines: {},
-
-    // [02-06] 入札認証状態（備考5）
-    authState: "LOCKED", // LOCKED / UNLOCKED
-
-    // [02-07] 入札者情報
+    // プロファイル
     profile: {
-      email: "",
-      address: "",
-      companyName: "",
-      representativeName: "",
-      contactName: "",
-      contactInfo: ""
+      email:"",
+      address:"",
+      company:"",
+      rep:"",
+      person:"",
+      tel:""
     },
-    profileState: "INCOMPLETE", // INCOMPLETE / COMPLETE
+    profileState: "INCOMPLETE",   // INCOMPLETE / COMPLETE
 
-    // [02-08] 画面モード
-    viewOnly: false,
-    inputEnabled: false,
-
-    // [02-09] 時刻
-    lastLoadedAt: "",
-    lastSavedAt: ""
+    lastLoadedAt: null
   };
 
-  function nowIso() { return new Date().toISOString(); }
-
-  function safeLog(msg) {
-    try { if (BID.Log && BID.Log.write) BID.Log.write(msg); } catch (e) {}
-  }
-  function safeError(msg) {
-    try { if (BID.Render && BID.Render.setError) BID.Render.setError(msg); } catch (e) {}
-  }
-
-  BID.State = {
-    get: function () { return state; },
-
-    // [02-10] bidNo 初期化
-    initBidNo: function () {
-      var fromConfig = (BID.CONFIG && BID.CONFIG.BID_NO) ? String(BID.CONFIG.BID_NO) : "";
-      state.bidNo = fromConfig;
-      if (!state.bidNo) {
-        safeError("入札番号が未設定です。js/01_bidder_config.js の BID.CONFIG.BID_NO を設定してください。");
-        safeLog("[config] ERROR: BID_NO is empty.");
-      } else {
-        safeLog("[config] BID_NO=" + state.bidNo);
+  function _scheduleNotify(){
+    if(_notifyTimer){ return; }
+    _notifyTimer = setTimeout(function(){
+      _notifyTimer = null;
+      for(var i=0;i<_listeners.length;i++){
+        try{ _listeners[i](state); }catch(e){}
       }
-    },
+    }, 0);
+  }
 
-    // [02-11] ログイン関連
-    setUser: function (user) {
-      state.user = user || null;
-      state.loginState = user ? "SIGNED-IN" : "SIGNED-OUT";
-      safeLog("[state] setUser: " + (user ? ("uid=" + user.uid) : "null"));
-    },
-    setBidderId: function (bidderId) {
-      state.bidderId = String(bidderId || "");
-      state.bidderNo = state.bidderId; // 同一ルール
-      safeLog("[state] setBidderId: " + (state.bidderId || "(empty)"));
-    },
+  function onChange(fn){
+    _listeners.push(fn);
+  }
 
-    // [02-12] bid / items / offer
-    setBid: function (bid) {
-      state.bid = bid || null;
-      state.bidStatus = (bid && bid.status) ? String(bid.status) : "";
-      safeLog("[state] setBid: status=" + (state.bidStatus || "(empty)"));
-    },
-    setItems: function (items) {
-      state.items = items || [];
-      safeLog("[state] setItems: " + state.items.length);
-    },
-    setOffer: function (offer) {
-      state.offer = offer || null;
-      try { state.offerLines = (offer && offer.lines) ? offer.lines : {}; }
-      catch (e) { state.offerLines = {}; }
-      safeLog("[state] setOffer: " + (offer ? "exists" : "null"));
-    },
-    setOfferLines: function (lines) {
-      state.offerLines = lines || {};
-      safeLog("[state] setOfferLines");
-    },
+  function setBidNo(v){
+    state.bidNo = v;
+    _scheduleNotify();
+  }
 
-    // [02-13] 認証
-    setAuthState: function (s) {
-      state.authState = s || "LOCKED";
-      safeLog("[state] setAuthState: " + state.authState);
-    },
+  function setUser(u){
+    state.user = u;
+    state.loginState = u ? "SIGNED-IN" : "SIGNED-OUT";
+    safeLog("state", "setUser: " + (u ? ("uid=" + u.uid) : "null"));
+    _scheduleNotify();
+  }
 
-    // [02-14] profile
-    setProfile: function (p) {
-      p = p || {};
-      state.profile.email = (p.email != null) ? String(p.email) : "";
-      state.profile.address = (p.address != null) ? String(p.address) : "";
-      state.profile.companyName = (p.companyName != null) ? String(p.companyName) : "";
-      state.profile.representativeName = (p.representativeName != null) ? String(p.representativeName) : "";
-      state.profile.contactName = (p.contactName != null) ? String(p.contactName) : "";
-      state.profile.contactInfo = (p.contactInfo != null) ? String(p.contactInfo) : "";
-      safeLog("[state] setProfile");
-    },
-    setProfileState: function (s) {
-      state.profileState = s || "INCOMPLETE";
-      safeLog("[state] setProfileState: " + state.profileState);
-    },
+  function setBidderId(bidderId, bidderEmail){
+    state.bidderId = bidderId || null;
+    state.bidderEmail = bidderEmail || null;
+    safeLog("state", "setBidderId: " + (bidderId ? bidderId : "(empty)"));
+    _scheduleNotify();
+  }
 
-    // [02-15] mode
-    setViewOnly: function (yes) {
-      state.viewOnly = !!yes;
-      safeLog("[state] setViewOnly: " + (state.viewOnly ? "true" : "false"));
-    },
-    setInputEnabled: function (yes) {
-      state.inputEnabled = !!yes;
-      safeLog("[state] setInputEnabled: " + (state.inputEnabled ? "true" : "false"));
-    },
+  function setBid(bid){
+    state.bid = bid;
+    var st = (bid && bid.status) ? bid.status : "(none)";
+    safeLog("state", "setBid: status=" + st);
+    _scheduleNotify();
+  }
 
-    // [02-16] timestamps
-    setLastLoadedAt: function (iso) { state.lastLoadedAt = iso || nowIso(); safeLog("[state] lastLoadedAt=" + state.lastLoadedAt); },
-    setLastSavedAt: function (iso) { state.lastSavedAt = iso || nowIso(); safeLog("[state] lastSavedAt=" + state.lastSavedAt); }
+  function setItems(items){
+    state.items = items || [];
+    safeLog("state", "setItems: " + state.items.length);
+    _scheduleNotify();
+  }
+
+  function setOffer(offer){
+    state.offer = offer || null;
+    _scheduleNotify();
+  }
+
+  function setOfferLines(lines){
+    state.offerLines = lines || [];
+    _scheduleNotify();
+  }
+
+  function setAuthState(v){
+    state.authState = v;
+    safeLog("state", "setAuthState: " + v);
+    _scheduleNotify();
+  }
+
+  function setViewOnly(v){
+    state.viewOnly = !!v;
+    safeLog("state", "setViewOnly: " + (state.viewOnly ? "true":"false"));
+    _scheduleNotify();
+  }
+
+  function setInputEnabled(v){
+    state.inputEnabled = !!v;
+    safeLog("state", "setInputEnabled: " + (state.inputEnabled ? "true":"false"));
+    _scheduleNotify();
+  }
+
+  function setProfile(p){
+    // [ST-02] 参照を維持しつつ更新
+    p = p || {};
+    state.profile.email   = p.email   || "";
+    state.profile.address = p.address || "";
+    state.profile.company = p.company || "";
+    state.profile.rep     = p.rep     || "";
+    state.profile.person  = p.person  || "";
+    state.profile.tel     = p.tel     || "";
+    safeLog("state", "setProfile");
+    _scheduleNotify();
+  }
+
+  function setProfileState(v){
+    state.profileState = v;
+    safeLog("state", "setProfileState: " + v);
+    _scheduleNotify();
+  }
+
+  function setLastLoadedAt(iso){
+    state.lastLoadedAt = iso || null;
+    safeLog("state", "lastLoadedAt=" + (state.lastLoadedAt || "(none)"));
+    _scheduleNotify();
+  }
+
+  function computeProfileState(){
+    // [ST-03] 必須チェック
+    var p = state.profile;
+    var ok = !!(p.email && p.address && p.company && p.rep && p.person && p.tel);
+    setProfileState(ok ? "COMPLETE" : "INCOMPLETE");
+    return ok;
+  }
+
+  function computeMode(){
+    var status = (state.bid && state.bid.status) ? state.bid.status : "(none)";
+    // viewOnly: closed は閲覧固定、open は通常
+    var viewOnly = (status === "closed");
+    setViewOnly(viewOnly);
+
+    // inputEnabled: login + auth + profileComplete + open
+    var profileOk = (state.profileState === "COMPLETE");
+    var enabled = (state.loginState === "SIGNED-IN" &&
+                   state.authState === "UNLOCKED" &&
+                   profileOk &&
+                   status === "open" &&
+                   !viewOnly);
+    setInputEnabled(enabled);
+
+    safeLog("mode",
+      "status=" + status +
+      " login=" + state.loginState +
+      " bidderId=" + (state.bidderId ? state.bidderId : "(none)") +
+      " auth=" + state.authState +
+      " profile=" + state.profileState +
+      " input=" + (state.inputEnabled ? "true":"false") +
+      " viewOnly=" + (state.viewOnly ? "true":"false")
+    );
+  }
+
+  window.BidderState = {
+    get: function(){ return state; },
+    onChange: onChange,
+
+    setBidNo: setBidNo,
+    setUser: setUser,
+    setBidderId: setBidderId,
+    setBid: setBid,
+    setItems: setItems,
+    setOffer: setOffer,
+    setOfferLines: setOfferLines,
+    setAuthState: setAuthState,
+    setViewOnly: setViewOnly,
+    setInputEnabled: setInputEnabled,
+    setProfile: setProfile,
+    setProfileState: setProfileState,
+    setLastLoadedAt: setLastLoadedAt,
+
+    computeProfileState: computeProfileState,
+    computeMode: computeMode
   };
-
-})(window);
+})();
