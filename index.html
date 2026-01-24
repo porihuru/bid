@@ -1,8 +1,10 @@
 <!--
-[JST 2026-01-24 21:30]  index.html v20260124-03
+[JST 2026-01-24 22:10]  index.html v20260124-03
 入札フォーム（入札者）/ 個別JS読み込み運用
-修正:
-  - Firebase SDK(compat) を有効化（firebase未定義で全停止するのを防ぐ）
+改修目的:
+  - Firebase未読込で全停止→ログも出ない、を防ぐ（BOOTログを最初に用意）
+  - JSが途中で死んでもログが残る
+  - 入札番号/状態が取れない原因をログに確実に出す
 -->
 <!doctype html>
 <html lang="ja">
@@ -60,13 +62,71 @@
     .footer{ margin-top:10px; font-size:12px; color:var(--muted); }
     .small{ font-size:12px; color:var(--muted); }
   </style>
+
+  <!-- =========================================================
+       [BOOT-01] 最速ログ（外部JSが死んでも必ず残す）
+       - window.BOOTLOG.write(tag,msg)
+       - window.onerror / unhandledrejection をログに出す
+     ========================================================= -->
+  <script>
+  (function(){
+    function ts(){ try{ return new Date().toISOString(); }catch(e){ return ""; } }
+    var buf = [];
+    var paused = false;
+
+    function append(line){
+      if(paused){ buf.push(line); return; }
+      buf.push(line);
+      // textarea接続はDOM後。ここではバッファだけ。
+      try{ console.log(line); }catch(e){}
+    }
+
+    window.BOOTLOG = {
+      pause: function(v){ paused = !!v; },
+      write: function(tag, msg){
+        append("[" + ts() + "] [" + tag + "] " + msg);
+      },
+      flushTo: function(textarea){
+        try{
+          if(!textarea) return;
+          textarea.value = buf.join("\n") + (buf.length ? "\n" : "");
+          textarea.scrollTop = textarea.scrollHeight;
+        }catch(e){}
+      },
+      getText: function(){ return buf.join("\n") + (buf.length ? "\n" : ""); }
+    };
+
+    window.addEventListener("error", function(ev){
+      var m = (ev && ev.message) ? ev.message : "Script Error";
+      var src = (ev && ev.filename) ? ev.filename : "";
+      var ln = (ev && ev.lineno) ? ev.lineno : "";
+      window.BOOTLOG.write("BOOT-ERROR", m + " " + src + ":" + ln);
+    });
+
+    window.addEventListener("unhandledrejection", function(ev){
+      var r = (ev && ev.reason) ? ev.reason : "";
+      var msg = (r && r.message) ? r.message : ("" + r);
+      window.BOOTLOG.write("BOOT-PROMISE", msg);
+    });
+
+    window.BOOTLOG.write("BOOT", "boot logger ready");
+  })();
+  </script>
+
+  <!-- =========================================================
+       [BOOT-02] Firebase compat SDK（これが無いと firebase が undefined で全停止）
+       ※既に別ファイルで読み込んでいない前提。重複する場合は片方を削除。
+     ========================================================= -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 
 <body>
   <div class="wrap">
     <div class="topbar">
       <div class="title">入札フォーム（入札者）</div>
-      <div class="ver mono" id="lblPageVer">v20260124-03</div>
+      <div class="ver mono" id="lblPageVer">v20260124-031</div>
     </div>
 
     <!-- 状態表示 -->
@@ -119,7 +179,7 @@
         </div>
 
         <div class="col">
-          <div class="hint">2) 入札認証（備考5コード）は今のまま</div>
+          <div class="hint">2) 入札認証（備考5コード）</div>
           <label>認証コード（備考5）</label>
           <input id="txtAuthCode" type="text" inputmode="latin" />
           <div class="btnRow" style="margin-top:10px;">
@@ -209,12 +269,6 @@
       <pre id="preVerList" class="mono" style="white-space:pre-wrap;margin:6px 0 0 0;"></pre>
     </div>
   </div>
-
-  <!-- Firebase（compat：firebase.auth()/firebase.firestore() を使う前提） -->
-  <!-- オフライン運用なら、この3本をローカルに置いて参照先を差し替えてください -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <!-- 個別JS（01→10の順） -->
   <script src="js/01_bidder_config.js"></script>
