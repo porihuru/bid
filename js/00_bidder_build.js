@@ -1,72 +1,169 @@
-// [JST 2026-01-23 22:20] bidder/js/00_bidder_build.js v20260123-01
-// [BID-00] ビルド/バージョン管理（JSロード時のログ出力）
-// 目的:
-//  - 各JSが「読み込まれた時点」でバージョンを登録
-//  - BID.Log が未初期化でもキューに溜め、後から flush してログに出す
-//  - 画面表示（任意）にも出せるようにする
+/*
+[JST 2026-01-24 21:00] bidder/css/bidder.css v20260124-01
+[BID-CSS] 入札者フォーム共通スタイル（Edge95想定）
+*/
 
-(function (global) {
-  var BID = global.BID = global.BID || {};
+:root{
+  --bg:#0f1324;
+  --panel:rgba(255,255,255,0.06);
+  --line:rgba(255,255,255,0.14);
+  --text:#e8ecff;
+  --muted:rgba(232,236,255,0.72);
+  --ok:rgba(120,255,170,0.22);
+  --err:rgba(255,120,120,0.22);
+  --info:rgba(120,200,255,0.18);
+}
 
-  var _queue = [];  // {ts, name, ver}
-  var _seen = {};   // 重複防止
+html, body{
+  margin:0;
+  padding:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+}
 
-  function nowIso() { return new Date().toISOString(); }
-  function safeWrite(line) {
-    try {
-      if (BID.Log && BID.Log.write) {
-        BID.Log.write(line);
-        return true;
-      }
-    } catch (e) {}
-    return false;
+.wrap{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+.card{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:flex-end;
+}
+
+.k{
+  font-weight:700;
+}
+
+.muted{
+  color:var(--muted);
+}
+
+.field{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+input{
+  background: rgba(0,0,0,0.22);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  outline:none;
+  min-width: 180px;
+}
+
+input:disabled{
+  opacity: 0.55;
+}
+
+.btn{
+  background: rgba(255,255,255,0.10);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor:pointer;
+  min-height: 40px;
+}
+
+.btn:disabled{
+  opacity: 0.45;
+  cursor:not-allowed;
+}
+
+.msg{
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  margin: 6px 0;
+}
+
+.msg.err{
+  background: var(--err);
+}
+
+.msg.ok{
+  background: var(--ok);
+}
+
+.msg.info{
+  background: var(--info);
+}
+
+table{
+  width:100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th, td{
+  border-bottom: 1px solid var(--line);
+  padding: 8px 6px;
+  vertical-align: top;
+}
+
+thead th{
+  color: var(--muted);
+  font-weight: 700;
+}
+
+#itemsTableWrap{
+  overflow-x:auto;
+}
+
+.itemName{
+  font-weight: 700;
+}
+
+.itemSpec{
+  color: var(--muted);
+  margin-top: 3px;
+  font-size: 0.92em;
+}
+
+.priceInput{
+  width: 110px;
+  min-width: 110px;
+}
+
+#logBox{
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  max-height: 240px;
+  overflow:auto;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 8px;
+}
+
+/* 印刷（まずは最小） */
+@media print{
+  body{ background:#fff; color:#000; }
+  .wrap{ max-width:none; }
+  .card{ background:#fff; border: 0; }
+  #statusBar, #toolbar, #msgArea, #loginSection, #authSection, #profileSection, #bidInfoSection, #itemsSection, #submitSection, #logSection{
+    display:none !important;
   }
-
-  BID.Build = {
-    // 各JS先頭で呼ぶ：BID.Build.report("08_bidder_render.js", "v20260123-01")
-    report: function (name, ver) {
-      name = String(name || "");
-      ver = String(ver || "");
-      var key = name + "@" + ver;
-
-      // 同一ファイル同一バージョンの二重登録は抑止（script重複読込対策）
-      if (_seen[key]) return;
-      _seen[key] = true;
-
-      var rec = { ts: nowIso(), name: name, ver: ver };
-      _queue.push(rec);
-
-      // Log がすでに使えるなら即出力、まだならキューに残す
-      var line = "[ver] " + rec.ts + " " + rec.name + " " + rec.ver;
-      safeWrite(line);
-    },
-
-    // 起動後に呼ぶ：溜まっている分をログに必ず出す
-    flush: function () {
-      if (!_queue.length) return;
-
-      // Logが無いなら何もしない（後でまた呼べる）
-      if (!(BID.Log && BID.Log.write)) return;
-
-      // すでに即時出力済みの分も含むが、見た目上は問題ない。
-      // 二重が嫌なら safeWrite の成否で分岐して出し分けることも可能。
-      for (var i = 0; i < _queue.length; i++) {
-        var r = _queue[i];
-        BID.Log.write("[ver] " + r.ts + " " + r.name + " " + r.ver);
-      }
-
-      // 画面表示（任意：id="verList" があれば追記）
-      try {
-        var box = document.getElementById("verList");
-        if (box) {
-          var s = "";
-          for (var j = 0; j < _queue.length; j++) {
-            s += _queue[j].name + " " + _queue[j].ver + "\n";
-          }
-          box.textContent = s;
-        }
-      } catch (e2) {}
-    }
-  };
-
-})(window);
+  #printArea{
+    display:block !important;
+  }
+}
