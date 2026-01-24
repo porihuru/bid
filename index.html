@@ -1,9 +1,8 @@
 <!--
-[JST 2026-01-24 21:30]  index.html v20260124-022
+[JST 2026-01-24 21:30]  index.html v20260124-03
 入札フォーム（入札者）/ 個別JS読み込み運用
-目的:
-  - iPhoneでもログをコピーできる（ログ停止/コピー）
-  - 個別JS(01-10)を順に読み込み
+修正:
+  - Firebase SDK(compat) を有効化（firebase未定義で全停止するのを防ぐ）
 -->
 <!doctype html>
 <html lang="ja">
@@ -67,7 +66,7 @@
   <div class="wrap">
     <div class="topbar">
       <div class="title">入札フォーム（入札者）</div>
-      <div class="ver mono" id="lblPageVer">v20260124-022</div>
+      <div class="ver mono" id="lblPageVer">v20260124-03</div>
     </div>
 
     <!-- 状態表示 -->
@@ -210,6 +209,12 @@
       <pre id="preVerList" class="mono" style="white-space:pre-wrap;margin:6px 0 0 0;"></pre>
     </div>
   </div>
+
+  <!-- Firebase（compat：firebase.auth()/firebase.firestore() を使う前提） -->
+  <!-- オフライン運用なら、この3本をローカルに置いて参照先を差し替えてください -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <!-- 個別JS（01→10の順） -->
   <script src="js/01_bidder_config.js"></script>
