@@ -1,46 +1,36 @@
-// [JST 2026-01-20 19:00]  bidder/js/03_bidder_log.js  v20260120-01
+// [JST 2026-01-23 22:30] js/03_bidder_log.js v20260123-01
+// [BID-03] ログ（必ずユーザーに見える）
 (function (global) {
   var BID = global.BID = global.BID || {};
+  var boxId = "logBox";
 
-  // =========================================================
-  // [03-01] ユーティリティ（Edge95想定）
-  // =========================================================
-  function pad2(n) { n = String(n); return n.length >= 2 ? n : ("0" + n); }
-  function nowStamp() {
+  function pad(n){ return (n<10?"0":"")+n; }
+  function nowJst() {
+    // 表示は端末ローカル時刻でOK
     var d = new Date();
-    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) +
-      " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+    return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
   }
 
-  function el(id) { return document.getElementById(id); }
+  function el() { return document.getElementById(boxId); }
 
-  // =========================================================
-  // [03-02] ログAPI
-  // =========================================================
   BID.Log = {
-    clear: function () {
-      var box = el("logBox");
-      if (box) box.textContent = "";
-      var ft = el("logFooter");
-      if (ft) ft.textContent = "";
-    },
-
     write: function (msg) {
-      var box = el("logBox");
-      if (!box) return;
-
-      var line = "[" + nowStamp() + "] " + msg;
-      box.textContent = (box.textContent ? (box.textContent + "\n") : "") + line;
-
-      // 末尾へスクロール
-      try { box.scrollTop = box.scrollHeight; } catch (e) {}
-
-      // フッター（行数表示）
-      var ft = el("logFooter");
-      if (ft) {
-        var count = box.textContent ? box.textContent.split("\n").length : 0;
-        ft.textContent = "行数: " + count;
-      }
+      var e = el();
+      if (!e) return;
+      var line = "[" + nowJst() + "] " + String(msg || "");
+      e.textContent = e.textContent ? (e.textContent + "\n" + line) : line;
+      e.scrollTop = e.scrollHeight;
+    },
+    clear: function () {
+      var e = el();
+      if (e) e.textContent = "";
+    },
+    ver: function (file, ver) {
+      // 各JSの先頭で呼ぶ想定：読み込まれたことが分かる
+      BID.Log.write("[ver] " + file + " " + ver);
     }
   };
+
+  BID.Log.ver("03_bidder_log.js", "v20260123-01");
 })(window);
