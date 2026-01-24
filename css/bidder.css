@@ -1,182 +1,147 @@
-/* 
-[JST 2026-01-20 19:00]  bidder/css/bidder.css  v20260120-01
-入札者フォーム CSS（画面＋印刷）
+/*
+[JST 2026-01-23 22:30] css/bidder.css v20260123-01
+Edge95想定：シンプルで崩れにくい
 */
-
-/* [CSS-01] ベース */
 :root{
-  --bg:#f7f7f7;
-  --panel:#ffffff;
-  --border:#d9d9d9;
-  --muted:#666;
-  --text:#222;
-  --okbg:#eaffea;
-  --okbd:#a9e9a9;
-  --errbg:#ffecec;
-  --errbd:#ffb3b3;
-  --infobg:#eef6ff;
-  --infobd:#b6d7ff;
+  --bg:#f5f6f8;
+  --card:#ffffff;
+  --bd:#d9dce1;
+  --text:#1f2328;
+  --muted:#667085;
+  --ok:#0f8a3b;
+  --err:#b42318;
+  --info:#175cd3;
+  --btn:#eef0f4;
+  --btnbd:#cfd4dc;
 }
 
-html, body{
-  height:100%;
-}
+*{ box-sizing:border-box; }
 body{
   margin:0;
-  color:var(--text);
   background:var(--bg);
-  font-family: system-ui, -apple-system, "Segoe UI", Arial, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+  color:var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
 }
-
-/* [CSS-02] レイアウト */
 .wrap{
-  max-width:980px;
-  margin:0 auto;
-  padding:12px;
+  max-width: 980px;
+  margin: 12px auto;
+  padding: 0 10px 30px;
 }
-.row{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  align-items:center;
-}
-.k{ font-weight:600; }
-.muted{ color:var(--muted); font-size:0.95em; }
 
 .card{
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:10px;
-  margin:10px 0;
+  background:var(--card);
+  border:1px solid var(--bd);
+  border-radius:12px;
+  padding:12px;
+  margin-top:10px;
 }
 
-/* [CSS-03] ボタン */
-.btn{
-  padding:10px 12px;
-  border:1px solid #999;
-  background:#f6f6f6;
-  border-radius:10px;
-  cursor:pointer;
-}
-.btn:disabled{
-  opacity:0.5;
-  cursor:not-allowed;
+.row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
 }
 
-/* [CSS-04] メッセージ */
-.msg{
-  padding:10px;
-  border-radius:10px;
-  margin:6px 0;
-}
-.msg.err{
-  background:var(--errbg);
-  border:1px solid var(--errbd);
-}
-.msg.ok{
-  background:var(--okbg);
-  border:1px solid var(--okbd);
-}
-.msg.info{
-  background:var(--infobg);
-  border:1px solid var(--infobd);
-}
+.k{ font-weight:700; }
+.muted{ color:var(--muted); font-size:0.92em; }
 
-/* [CSS-05] フォーム */
 .field{
   display:flex;
   flex-direction:column;
-  gap:4px;
-  min-width:260px;
+  gap:6px;
 }
-.field input{
-  padding:10px;
-  border:1px solid #ccc;
+input{
+  padding:10px 10px;
+  border:1px solid var(--bd);
   border-radius:10px;
+  font-size:16px;
+  outline:none;
+}
+input:disabled{
+  background:#f1f2f4;
+  color:#777;
 }
 
-/* [CSS-06] テーブル */
-#itemsTableWrap{
-  overflow:auto;
+.btn{
+  padding:10px 12px;
+  background:var(--btn);
+  border:1px solid var(--btnbd);
+  border-radius:10px;
+  cursor:pointer;
+  font-size:16px;
 }
+.btn:disabled{
+  opacity:0.55;
+  cursor:not-allowed;
+}
+.btn.primary{
+  background:#e7f0ff;
+  border-color:#b6d2ff;
+}
+
+.msg{
+  padding:10px;
+  border-radius:10px;
+  border:1px solid var(--bd);
+  background:#fafafa;
+}
+.msg.ok{
+  border-color:#b7e4c7;
+  background:#ecfff3;
+  color:var(--ok);
+}
+.msg.err{
+  border-color:#f4b4ae;
+  background:#fff1f0;
+  color:var(--err);
+}
+.msg.info{
+  border-color:#c7d7ff;
+  background:#eef4ff;
+  color:#0b3aa5;
+}
+
+#itemsTableWrap{ overflow:auto; }
 table{
   width:100%;
   border-collapse:collapse;
+  min-width:780px;
 }
-th, td{
-  border:1px solid var(--border);
+th,td{
+  border:1px solid var(--bd);
   padding:8px;
   vertical-align:top;
+  font-size:14px;
 }
-th{
-  background:#f5f5f5;
-}
-.itemName{ font-weight:600; }
-.itemSpec{ color:#444; margin-top:4px; }
+th{ background:#f2f4f7; text-align:left; }
+.itemName{ font-weight:700; }
+.itemSpec{ color:var(--muted); margin-top:4px; }
+.priceInput{ width:120px; }
 
-/* [CSS-07] 単価入力（狭い画面で崩れにくく） */
-.priceInput{
-  width:110px;
-  padding:8px;
-  border:1px solid #ccc;
-  border-radius:10px;
-  text-align:right;
-}
-
-/* [CSS-08] ログ */
 #logBox{
-  white-space:pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size:12px;
-  height:180px;
-  overflow:auto;
-  border:1px solid var(--border);
+  border:1px solid var(--bd);
   border-radius:10px;
-  padding:10px;
-  background:#fafafa;
+  padding:8px;
+  min-height:90px;
+  max-height:240px;
+  overflow:auto;
+  background:#fcfcfd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size:12px;
+  white-space:pre-wrap;
 }
 
-/* [CSS-09] 印刷（printAreaを使う） */
+/* 印刷 */
 @media print{
-  body{
-    background:#fff;
-  }
-  /* 画面用は非表示 */
-  #toolbar,
-  #msgArea,
-  #authSection,
-  #logSection,
-  #submitSection{
+  body{ background:#fff; }
+  .wrap{ max-width:none; margin:0; padding:0; }
+  #toolbar, #logSection, #msgArea, #loginSection, #authSection, #profileSection, #submitSection, #itemsSection, #bidInfoSection, #statusBar{
     display:none !important;
   }
-
-  /* 印刷用表示 */
   #printArea{
     display:block !important;
-    border:0 !important;
-    margin:0 !important;
-    padding:0 !important;
-  }
-
-  /* ステータスバーは簡易表示にしたい場合はJS側でprintAreaへ転記 */
-  #statusBar{
-    border:0 !important;
-  }
-
-  .card{
-    border:0 !important;
-    border-radius:0 !important;
-    padding:0 !important;
-    margin:0 0 10px 0 !important;
-  }
-
-  /* 印刷で見切れにくく */
-  #itemsTableWrap{
-    overflow:visible !important;
-  }
-
-  a, button, input{
-    display:none !important;
+    border:none !important;
+    margin-top:0;
   }
 }
