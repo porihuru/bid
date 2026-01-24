@@ -1,69 +1,67 @@
-// [JST 2026-01-23 22:30] js/05_bidder_login.js v20260123-01
-// [BID-05] ログイン（入札者ID+PW → email化して signInWithEmailAndPassword）
+// [JST 2026-01-24 21:00] bidder/js/05_bidder_auth.js v20260124-01
+// [BID-05] 入札認証（備考5）: ログイン後に実施
 (function (global) {
   var BID = global.BID = global.BID || {};
+  if (BID.Build && BID.Build.register) BID.Build.register("05_bidder_auth.js", "v20260124-01");
 
-  function el(id){ return document.getElementById(id); }
-  function trim(s){ return (s==null) ? "" : String(s).replace(/^\s+|\s+$/g,""); }
-  function msgOf(e){ return (e && e.message) ? e.message : String(e || ""); }
+  function trim(s) { return (s == null) ? "" : String(s).replace(/^\s+|\s+$/g, ""); }
 
-  function bidderIdToEmail(bidderId){
-    var dom = (BID.CONFIG && BID.CONFIG.AUTH_EMAIL_DOMAIN) ? BID.CONFIG.AUTH_EMAIL_DOMAIN : "bid.local";
-    return String(bidderId) + "@" + dom;
-  }
+  BID.Auth = {
+    tryAuth: function () {
+      var st = BID.State.get();
+      var bid = st.bid;
 
-  BID.Login = {
-    bidderIdToEmail: bidderIdToEmail,
+      if (!st.user) {
+        if (BID.Render) BID.Render.setError("先にログインしてください。");
+        if (BID.Log) BID.Log.write("[auth] NG: not signed in");
+        return false;
+      }
+      if (!bid) {
+        if (BID.Render) BID.Render.setError("入札データが未読込です。");
+        if (BID.Log) BID.Log.write("[auth] NG: bid not loaded");
+        return false;
+      }
 
-    applyBidderIdToProfileUI: function (bidderId) {
-      var inp = el("inpBidderId");
-      if (inp) inp.value = bidderId || "";
-    },
+      var codeIn = "";
+      var input = document.getElementById("authCode");
+      if (input) codeIn = trim(input.value);
+      if (!codeIn) {
+        if (BID.Render) {
+          BID.Render.setInfo(BID.CONFIG.MSG_AUTH_PROMPT);
+          BID.Render.setAuthResult("認証コードを入力してください。");
+        }
+        if (BID.Log) BID.Log.write("[auth] NG: empty");
+        return false;
+      }
 
-    signIn: function () {
-      var bidderId = trim(el("loginId") ? el("loginId").value : "");
-      var pw = trim(el("loginPw") ? el("loginPw").value : "");
-      if (!bidderId) throw new Error("入札者IDが未入力です。");
-      if (!pw) throw new Error("パスワードが未入力です。");
+      var correct = trim(BID.DB.getAuthCodeFromBid(bid));
+      if (!correct) {
+        if (BID.Render) {
+          BID.Render.setError("認証コード（備考5）が設定されていません。");
+          BID.Render.setAuthResult("認証コードが設定されていません。");
+        }
+        if (BID.Log) BID.Log.write("[auth] NG: bid.note5 empty");
+        return false;
+      }
 
-      var email = bidderIdToEmail(bidderId);
-      BID.Log.write("[login] start: " + bidderId + " (" + email + ")");
-
-      return BID.DB.auth().signInWithEmailAndPassword(email, pw).then(function (cred) {
-        var u = cred && cred.user ? cred.user : BID.DB.auth().currentUser;
-        BID.State.setUser(u);
-        BID.State.setBidderId(bidderId);
-
-        // profile欄にも反映（入札者番号=ID）
-        BID.Login.applyBidderIdToProfileUI(bidderId);
-
-        // 表示
-        if (el("loginResult")) el("loginResult").textContent = "ログイン成功: " + bidderId;
-        BID.Log.write("[login] OK uid=" + (u ? u.uid : "?"));
-        return { ok:true, bidderId: bidderId };
-      }).catch(function (e) {
-        var m = msgOf(e);
-        if (el("loginResult")) el("loginResult").textContent = "ログイン失敗: " + m;
-        BID.Log.write("[login] FAILED " + m);
-        throw e;
-      });
-    },
-
-    signOut: function () {
-      BID.Log.write("[logout] start");
-      return BID.DB.auth().signOut().then(function () {
-        BID.State.setUser(null);
-        BID.State.setBidderId("");
-        if (el("loginResult")) el("loginResult").textContent = "ログアウトしました。";
-        BID.Log.write("[logout] OK");
-        return { ok:true };
-      }).catch(function (e) {
-        var m = msgOf(e);
-        BID.Log.write("[logout] FAILED " + m);
-        throw e;
-      });
+      if (codeIn === correct) {
+        BID.State.setAuthState("UNLOCKED");
+        if (BID.Render) {
+          BID.Render.setAuthResult("認証に成功しました。");
+          BID.Render.setOk("認証に成功しました。");
+        }
+        if (BID.Log) BID.Log.write("[auth] OK");
+        return true;
+      } else {
+        BID.State.setAuthState("LOCKED");
+        if (BID.Render) {
+          BID.Render.setAuthResult("認証に失敗しました。");
+          BID.Render.setError("認証に失敗しました。");
+        }
+        if (BID.Log) BID.Log.write("[auth] NG: mismatch");
+        return false;
+      }
     }
   };
 
-  try { if (BID.Log && BID.Log.ver) BID.Log.ver("05_bidder_login.js", "v20260123-01"); } catch (e) {}
 })(window);
