@@ -1,7 +1,11 @@
-/* [JST 2026-01-24 21:00]  09_bidder_print.js v20260124-01 */
+/* [JST 2026-01-25 10:00]  09_bidder_print.js v20260125-01
+   変更点:
+     - BidderPrint.doPdf を追加（PDF出力ボタンの呼び出し先）
+     - 中身は最小実装：window.print() を呼ぶ（保存はOS/ブラウザのPDF機能に任せる）
+*/
 (function(){
   var FILE = "09_bidder_print.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260126-01";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
@@ -18,7 +22,19 @@
     try{ window.print(); }catch(e){}
   }
 
+  // ★これを追加★：PDF出力（最小実装＝印刷ダイアログを開く）
+  // - iPhone/Safari: 共有→プリント→ピンチアウトでPDF→保存/共有
+  // - PC/Edge: 印刷先「Microsoft Print to PDF」等で保存
+  function doPdf(){
+    L("pdf", "doPdf -> window.print (PDF is handled by browser/OS)");
+    try{ window.print(); }catch(e){ L("pdf", "print failed: " + (e && e.message ? e.message : e)); }
+  }
+  // ★ここまで追加★
+
   window.BidderPrint = {
-    printPage: printPage
+    printPage: printPage,
+    // ★これを追加★：PDF出力ボタンが呼ぶ関数名
+    doPdf: doPdf
+    // ★ここまで追加★
   };
 })();
