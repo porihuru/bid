@@ -842,4 +842,52 @@
   }else{
     bootstrap();
   }
+
+// ★ 1/25 これを追加★ ------------------------------------------------------------
+// [MSG-MIRROR-01] 下部msgBoxの内容を上部msgBoxTopへミラー（既存処理は触らない）
+(function(){
+  function mirrorMsgBox(){
+    try{
+      var src = document.getElementById("msgBox");     // 既存（下部）
+      var dst = document.getElementById("msgBoxTop");  // 追加（上部）
+      if(!src || !dst) return;
+
+      function sync(){
+        // class / style / 中身を丸ごと同期（ok/errなどの見た目も一致）
+        dst.className = src.className;
+        dst.style.cssText = src.style.cssText;
+        dst.innerHTML = src.innerHTML;
+      }
+
+      // 初回同期
+      sync();
+
+      // 変更監視（テキスト更新・表示/非表示・クラス変更など）
+      var mo = new MutationObserver(function(){
+        sync();
+      });
+      mo.observe(src, { attributes:true, childList:true, subtree:true });
+
+    }catch(e){
+      // ここは壊れないように握りつぶし（ログがあるなら出す）
+      try{
+        if(window.BidderLog && window.BidderLog.write){
+          window.BidderLog.write("warn", "[MSG-MIRROR-01] failed: " + (e && e.message ? e.message : String(e)));
+        }else{
+          console.log("[MSG-MIRROR-01] failed:", e);
+        }
+      }catch(ex){}
+    }
+  }
+
+  // 10_bidder_app.js は body末尾で読み込まれているので DOM は基本できている想定。
+  // 念のため両対応（即時 / DOMContentLoaded）
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", mirrorMsgBox);
+  }else{
+    mirrorMsgBox();
+  }
+})();
+ // 1/25 ★ここまで追加★ ----------------------------------------------------------
+
 })();
