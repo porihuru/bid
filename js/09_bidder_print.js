@@ -1,5 +1,5 @@
 /* 
-[JST 2026-01-26 13:55]  09_bidder_print.js v20260126-02
+[JST 2026-01-27 20:00]  09_bidder_print.js v20260127-01
 入札フォーム（入札者）- 印刷/PDF出力（帳票デザイン版）
 
 反映要件:
@@ -11,10 +11,16 @@
   - 明細: 見本列あり、合計金額なし、署名押印欄なし
 制約:
   - bidder側は最小修正: このファイル(09)だけで完結（他JSに強依存しない）
+改善点:
+  - PDFのレイアウト崩れ対策:
+    * iframe を visibility:hidden にせず opacity:0＋画面外配置
+    * キャプチャ対象を body ではなく .sheet にする
+    * .sheet 幅を A4実寸(余白込み)に固定し、テーブル計算の揺れを抑える
+    * (可能なら) フォント確定(document.fonts.ready)を待つ
 */
 (function(){
   var FILE = "09_bidder_print.js";
-  var VER  = "v20260126-02";
+  var VER  = "v20260127-01";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
@@ -75,7 +81,7 @@
 
   // =========================================================
   // [PRN-02] header/profile/items を「取れれば取る」
-  //  - 取れない場合でも落とさず、印刷だけは動かす
+  //  - 取れない場合でも落とさず、帳票生成だけは動かす
   // =========================================================
   function tryGetBidHeaderObject(){
     // いろいろな形に「存在すれば対応」する（強依存しない）
@@ -130,6 +136,7 @@
       no = trim((tds[0].textContent||""));
       nameSpec = trim((tds[1].textContent||""));
       qty = trim((tds[2].textContent||""));
+
       // 単価は input の可能性が高い
       price = "";
       try{
@@ -138,6 +145,7 @@
         else price = trim((tds[3].textContent||""));
       }catch(e){ price = trim((tds[3].textContent||"")); }
 
+      // 備考も input の可能性
       note = "";
       try{
         var inp2 = tds[4] ? tds[4].getElementsByTagName("input") : null;
@@ -145,7 +153,7 @@
         else note = tds[4] ? trim((tds[4].textContent||"")) : "";
       }catch(e){ note = tds[4] ? trim((tds[4].textContent||"")) : ""; }
 
-      // unit は画面列に無いので、nameSpec内に含まれていなければ空
+      // unit は画面列に無いので空
       unit = "";
 
       // 「品目なし」行の除外
@@ -214,22 +222,24 @@
 
   function makeOneLineLabel(label, value){
     // 「ラベル：値」を同一行で折り返し可能にする
-    // value が長い場合は CSS で自然折り返し
     value = trim(value);
     if(value === "") return "";
     return '<div class="oneLine"><span class="lbl">' + esc(label) + '：</span><span class="val">' + esc(value) + '</span></div>';
   }
 
   // =========================================================
-  // [PRN-03] 印刷用HTML生成
+  // [PRN-03] 帳票HTML生成
   // =========================================================
   function buildPrintHtml(data){
-    // data: { title, bidNo, createdAt, toLines[], profile{}, outlineLine, deliveryLine, items[] }
+    // data: { title, bidNo, createdAt, toLines[], profile{}, bidDate, note, deliveryPlace, dueDate, items[] }
+    // ★A4余白: 左20mm(2cm) / 右10mm / 上下12mm → 本文幅 = 210 - 20 - 10 = 180mm
     var css = ''
       + '@page{ size:A4 portrait; margin:12mm 10mm 12mm 20mm; }'
-      + 'html,body{ height:auto; }'
+      + 'html,body{ height:auto; margin:0; padding:0; }'
       + 'body{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; color:#0f172a; background:#fff; }'
-      + '.sheet{ width:100%; }'
+      + '*,*::before,*::after{ box-sizing:border-box; }'
+      + '.sheet{ width:180mm; margin:0 auto; }'
+
       + '.top{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding-bottom:8px; border-bottom:2px solid #0f172a; }'
       + '.title{ font-size:20px; font-weight:800; letter-spacing:.06em; }'
       + '.meta{ text-align:right; font-size:11px; color:#334155; }'
@@ -238,7 +248,6 @@
       + '.section{ margin-top:10px; }'
       + '.secTitle{ font-size:12px; font-weight:800; color:#0f172a; letter-spacing:.08em; margin:0 0 6px 0; }'
       + '.box{ border:1px solid #cbd5e1; border-radius:10px; padding:10px; background:#fff; }'
-      + '.toBox{ }'
       + '.toLine{ font-size:12px; line-height:1.6; }'
 
       + '.profileBox{ text-align:right; }'
@@ -265,6 +274,7 @@
       + 'tbody tr:last-child td:last-child{ border-bottom-right-radius:10px; }'
       + 'tbody tr:last-child td{ border-bottom:1px solid #cbd5e1; }'
 
+      // mm列幅（A4実寸系。PDFもここが効く）
       + '.cNo{ width:14mm; text-align:right; font-weight:800; }'
       + '.cSample{ width:12mm; text-align:center; }'
       + '.cName{ width:auto; }'
@@ -278,9 +288,7 @@
       + '.footer{ margin-top:10px; display:flex; justify-content:space-between; color:#334155; font-size:10px; }'
       + '.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }'
 
-      + '@media print{'
-      + '  .noPrint{ display:none !important; }'
-      + '}';
+      + '@media print{ .noPrint{ display:none !important; } }';
 
     // 宛先
     var toHtml = '';
@@ -289,7 +297,7 @@
       toHtml += '<div class="toLine">' + esc(data.toLines[i]) + '</div>';
     }
 
-    // 入札者（右寄せヘッダブロック）
+    // 入札者（右寄せ）
     var p = data.profile || {};
     var profLines = [];
     if(trim(p.company) !== "") profLines.push('<div class="profileName">' + esc(p.company) + '</div>');
@@ -308,8 +316,6 @@
       var nm = trim(it.name);
       var sp = trim(it.spec);
 
-      // 画面由来の name に「品名/規格」が混在している場合もあるので、
-      // spec が空なら name をそのまま main に置き、spec欄は出さない。
       var nameHtml = '';
       nameHtml += '<div class="nameMain">' + esc(nm || "") + '</div>';
       if(sp !== ''){
@@ -331,7 +337,7 @@
       rows = '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:14px;">明細がありません</td></tr>';
     }
 
-    // まとめ
+    // HTML組み立て
     var html = ''
       + '<!doctype html>'
       + '<html lang="ja"><head><meta charset="utf-8" />'
@@ -341,7 +347,7 @@
       + '</head><body>'
       + '<div class="sheet">'
 
-      // TOP: タイトル + 右メタ（入札番号/作成）
+      // TOP
       + '<div class="top">'
       + '  <div class="title">' + esc(data.title) + '</div>'
       + '  <div class="meta">'
@@ -350,19 +356,19 @@
       + '  </div>'
       + '</div>'
 
-      // 宛先（左寄せ）
+      // 宛先
       + '<div class="section">'
       + '  <div class="secTitle">宛先</div>'
-      + '  <div class="box toBox">' + toHtml + '</div>'
+      + '  <div class="box">' + toHtml + '</div>'
       + '</div>'
 
-      // 入札者（右寄せ）
+      // 入札者
       + '<div class="section">'
       + '  <div class="secTitle" style="text-align:right;">入札者（提出者）</div>'
       + '  <div class="box profileBox">' + profLines.join("") + '</div>'
       + '</div>'
 
-      // 入札概要（左寄せ・1行折り返し）
+      // 入札概要
       + '<div class="section">'
       + '  <div class="secTitle">入札概要</div>'
       + '  <div class="box">'
@@ -371,7 +377,7 @@
       + '  </div>'
       + '</div>'
 
-      // 納入条件（左寄せ・1行折り返し）
+      // 納入条件
       + '<div class="section">'
       + '  <div class="secTitle">納入条件</div>'
       + '  <div class="box">'
@@ -402,8 +408,8 @@
 
       // footer
       + '<div class="footer">'
-      + '  <div>ページ <span class="mono">1 / 1</span></div>'
       + '  <div class="mono">' + esc(FILE + " " + VER) + '</div>'
+      + '  <div class="mono">' + esc(data.createdAt) + '</div>'
       + '</div>'
 
       + '</div></body></html>';
@@ -414,11 +420,9 @@
   function collectPrintData(){
     var now = new Date();
 
-    // bidNo（DOM優先、取れなければ state）
     var bidNoDom = getText("lblBidNo");
     var header = tryGetBidHeaderObject() || {};
 
-    // header から拾える候補を広めに見る
     function pickHeader(keys){
       for(var i=0;i<keys.length;i++){
         var k = keys[i];
@@ -436,7 +440,7 @@
       ""
     ]);
 
-    // 宛先（headerにあれば使う、無ければ空でも印刷はする）
+    // 宛先
     var to1 = pickHeader(["to1","宛先1"]);
     var to2 = pickHeader(["to2","宛先2"]);
     var to3 = pickHeader(["to3","宛先3"]);
@@ -445,14 +449,13 @@
     if(trim(to2)!=="") toLines.push(to2);
     if(trim(to3)!=="") toLines.push(to3);
     if(toLines.length){
-      // 最終行に御中を付ける（既に含まれていなければ）
       var last = toLines[toLines.length-1];
       if(last.indexOf("御中") < 0) toLines[toLines.length-1] = last + " 御中";
     }else{
       toLines.push("（宛先が取得できません）");
     }
 
-    // 入札概要/納入条件（headerから拾う。無ければ空）
+    // 入札概要/納入条件
     var bidDate = pickHeader(["bidDate","入札年月日","date"]);
     var note = pickHeader(["note","備考"]);
     var deliveryPlace = pickHeader(["deliveryPlace","納入場所"]);
@@ -479,7 +482,6 @@
       items = scrapeItemsFromTable();
     }
 
-    // 見本 正規化（items 生成時に保証）
     for(var j=0;j<items.length;j++){
       items[j].sample = normalizeSampleText(items[j].sample);
     }
@@ -503,13 +505,9 @@
     var html = buildPrintHtml(data);
 
     var w = null;
-    try{
-      w = window.open("", "_blank");
-    }catch(e){
-      w = null;
-    }
+    try{ w = window.open("", "_blank"); }catch(e){ w = null; }
     if(!w){
-      L("pdf", "window.open blocked");
+      L("print", "window.open blocked");
       alert("ポップアップがブロックされました。ブラウザ設定で許可してください。");
       return;
     }
@@ -519,13 +517,12 @@
       w.document.write(html);
       w.document.close();
     }catch(e2){
-      L("pdf", "write failed: " + (e2 && e2.message ? e2.message : e2));
+      L("print", "write failed: " + (e2 && e2.message ? e2.message : e2));
       try{ w.close(); }catch(e3){}
       alert("印刷用ページの生成に失敗しました。ログを確認してください。");
       return;
     }
 
-    // 印刷（描画完了を少し待ってから）
     try{
       var fired = false;
       function doPrint(){
@@ -534,221 +531,245 @@
         try{ w.focus(); }catch(e){}
         try{ w.print(); }catch(e){}
       }
-      // load が使えないケースに備えて両対応
       try{ w.onload = function(){ setTimeout(doPrint, 200); }; }catch(e){}
       setTimeout(doPrint, 600);
     }catch(e4){}
   }
 
   // =========================================================
+  // [PDF] libs
+  // =========================================================
+  function loadScript(url){
+    return new Promise(function(resolve, reject){
+      try{
+        var s = document.createElement("script");
+        s.src = url;
+        s.onload = function(){ resolve(); };
+        s.onerror = function(){ reject(new Error("load failed: " + url)); };
+        document.head.appendChild(s);
+      }catch(e){ reject(e); }
+    });
+  }
+
+  function ensurePdfLibs(){
+    return new Promise(function(resolve, reject){
+      try{
+        var hasH2C   = (typeof window.html2canvas === "function");
+        var hasJsPDF = !!(window.jspdf && window.jspdf.jsPDF);
+        if(hasH2C && hasJsPDF){ resolve(); return; }
+      }catch(e){}
+
+      var URL_H2C   = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      var URL_JSPDF = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+
+      loadScript(URL_H2C)
+        .then(function(){ return loadScript(URL_JSPDF); })
+        .then(function(){
+          try{
+            if(typeof window.html2canvas === "function" && window.jspdf && window.jspdf.jsPDF){
+              resolve();
+            }else{
+              reject(new Error("pdf libs not available after load"));
+            }
+          }catch(e){ reject(e); }
+        })
+        .catch(reject);
+    });
+  }
+
+  function safeFileName(s){
+    s = (s == null) ? "" : (""+s);
+    return s.replace(/[\\\/:\*\?"<>\|]/g, "_");
+  }
+
+  function fmtNow(){
+    try{
+      var d = new Date();
+      var y = d.getFullYear();
+      var m = ("0"+(d.getMonth()+1)).slice(-2);
+      var da= ("0"+d.getDate()).slice(-2);
+      return y + m + da;
+    }catch(e){
+      return "date";
+    }
+  }
+
+  function canvasToPdfAndSave(canvas, filename){
+    var jsPDF = window.jspdf.jsPDF;
+    var pdf = new jsPDF({ orientation:"p", unit:"mm", format:"a4" });
+
+    var pageW = 210;
+    var pageH = 297;
+
+    var imgW = pageW;
+    var imgH = canvas.height * (imgW / canvas.width);
+
+    if(imgH <= pageH){
+      var imgData1 = canvas.toDataURL("image/jpeg", 0.95);
+      pdf.addImage(imgData1, "JPEG", 0, 0, imgW, imgH);
+      pdf.save(filename);
+      return;
+    }
+
+    // 複数ページ：A4高さをpx換算してスライス
+    var pageHPx = Math.floor(canvas.width * (pageH / pageW));
+    var y = 0;
+    var pageIndex = 0;
+
+    while(y < canvas.height){
+      if(pageIndex > 0) pdf.addPage();
+
+      var sliceH = Math.min(pageHPx, canvas.height - y);
+
+      var c2 = document.createElement("canvas");
+      c2.width = canvas.width;
+      c2.height = sliceH;
+
+      var ctx = c2.getContext("2d");
+      ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+      var imgData = c2.toDataURL("image/jpeg", 0.95);
+      var sliceHmm = sliceH * (imgW / canvas.width);
+
+      pdf.addImage(imgData, "JPEG", 0, 0, imgW, sliceHmm);
+
+      y += sliceH;
+      pageIndex++;
+
+      c2.width = 1; c2.height = 1;
+    }
+
+    pdf.save(filename);
+  }
+
+  // =========================================================
+  // [PDF] 帳票HTML → iframe生成 → .sheet をキャプチャ → PDF保存
+  // =========================================================
+  function doPdfDownloadSameAsPrint(){
+    L("pdf", "PDF生成開始（帳票デザインをPDF化）");
+
+    function createFrameWithHtml(html){
+      var iframe = document.createElement("iframe");
+      // ★visibility:hidden を使わない（レイアウトが崩れる原因になりやすい）
+      iframe.style.position = "fixed";
+      iframe.style.left = "-99999px";
+      iframe.style.top = "0";
+      iframe.style.width = "1100px";
+      iframe.style.height = "1600px";
+      iframe.style.opacity = "0";
+      iframe.style.pointerEvents = "none";
+      iframe.setAttribute("aria-hidden", "true");
+      document.body.appendChild(iframe);
+
+      var doc = iframe.contentWindow.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      return iframe;
+    }
+
+    function removeFrame(iframe){
+      try{ if(iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); }catch(e){}
+    }
+
+    ensurePdfLibs().then(function(){
+      var data = collectPrintData();
+      var html = buildPrintHtml(data);
+      var iframe = createFrameWithHtml(html);
+
+      return new Promise(function(resolve, reject){
+        var win = iframe.contentWindow;
+        var doc = win.document;
+
+        // フォント確定待ち（使える環境のみ）
+        var waitFonts = (doc.fonts && doc.fonts.ready) ? doc.fonts.ready : Promise.resolve();
+
+        waitFonts.then(function(){
+          // レイアウト確定を少し待つ
+          setTimeout(function(){
+            try{
+              var target = doc.querySelector(".sheet") || doc.body;
+
+              window.html2canvas(target, {
+                backgroundColor: "#ffffff",
+                scale: 2,
+                useCORS: true,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: target.scrollWidth,
+                windowHeight: target.scrollHeight
+              }).then(function(canvas){
+                resolve({ canvas: canvas, iframe: iframe, data: data });
+              }).catch(function(err){
+                reject({ err: err, iframe: iframe });
+              });
+            }catch(e){
+              reject({ err: e, iframe: iframe });
+            }
+          }, 350);
+        }).catch(function(e){
+          // fonts.ready が落ちても続行
+          setTimeout(function(){
+            try{
+              var target2 = doc.querySelector(".sheet") || doc.body;
+              window.html2canvas(target2, {
+                backgroundColor: "#ffffff",
+                scale: 2,
+                useCORS: true,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: target2.scrollWidth,
+                windowHeight: target2.scrollHeight
+              }).then(function(canvas){
+                resolve({ canvas: canvas, iframe: iframe, data: data });
+              }).catch(function(err){
+                reject({ err: err, iframe: iframe });
+              });
+            }catch(e2){
+              reject({ err: e2, iframe: iframe });
+            }
+          }, 350);
+        });
+      });
+    }).then(function(res){
+      try{
+        var bidNo = (res.data && res.data.bidNo) ? (""+res.data.bidNo) : "";
+        var fn = "入札書_" + safeFileName(bidNo || "bid") + "_" + fmtNow() + ".pdf";
+        canvasToPdfAndSave(res.canvas, fn);
+        L("pdf", "PDF保存完了: " + fn);
+      }finally{
+        removeFrame(res.iframe);
+      }
+    }).catch(function(pack){
+      var err = pack && pack.err ? pack.err : pack;
+      var iframe = pack && pack.iframe ? pack.iframe : null;
+
+      L("pdf", "PDF生成失敗: " + (err && err.message ? err.message : err));
+      removeFrame(iframe);
+
+      // 保険：印刷ダイアログ（ここからPDF保存も可能）
+      alert("PDF生成に失敗したため、印刷ダイアログでPDF保存してください。");
+      try{ openPrintWindowAndPrint(); }catch(e2){ try{ window.print(); }catch(e3){} }
+    });
+  }
+
+  // =========================================================
   // [PRN-04] 公開API
   // =========================================================
   function printPage(){
-    // 既存の印刷（画面そのまま）を残す
+    // 互換用に残す（UIからは消してOK）
     L("print", "window.print (current page)");
     try{ window.print(); }catch(e){}
   }
 
-// =========================================================
-// [PDF-A] PDF生成（今の画面＝印刷しているものと同じ）をPDF保存する
-//   - html2canvas + jsPDF をCDNから動的ロード（index.htmlは触らない）
-//   - 失敗時は window.print() にフォールバック（PDF保存は印刷ダイアログで）
-// =========================================================
-function loadScript(url){
-  return new Promise(function(resolve, reject){
-    try{
-      var s = document.createElement("script");
-      s.src = url;
-      s.onload = function(){ resolve(); };
-      s.onerror = function(){ reject(new Error("load failed: " + url)); };
-      document.head.appendChild(s);
-    }catch(e){ reject(e); }
-  });
-}
-
-function ensurePdfLibs(){
-  return new Promise(function(resolve, reject){
-    try{
-      var hasH2C  = (typeof window.html2canvas === "function");
-      var hasJsPDF= !!(window.jspdf && window.jspdf.jsPDF);
-      if(hasH2C && hasJsPDF){ resolve(); return; }
-    }catch(e){}
-
-    var URL_H2C   = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-    var URL_JSPDF = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-
-    loadScript(URL_H2C)
-      .then(function(){ return loadScript(URL_JSPDF); })
-      .then(function(){
-        try{
-          if(typeof window.html2canvas === "function" && window.jspdf && window.jspdf.jsPDF){
-            resolve();
-          }else{
-            reject(new Error("pdf libs not available after load"));
-          }
-        }catch(e){ reject(e); }
-      })
-      .catch(reject);
-  });
-}
-
-function safeFileName(s){
-  s = (s == null) ? "" : (""+s);
-  return s.replace(/[\\\/:\*\?"<>\|]/g, "_");
-}
-
-function fmtNow(){
-  try{
-    var d = new Date();
-    var y = d.getFullYear();
-    var m = ("0"+(d.getMonth()+1)).slice(-2);
-    var da= ("0"+d.getDate()).slice(-2);
-    return y + m + da;
-  }catch(e){
-    return "date";
-  }
-}
-
-function canvasToPdfAndSave(canvas, filename){
-  var jsPDF = window.jspdf.jsPDF;
-  var pdf = new jsPDF({ orientation:"p", unit:"mm", format:"a4" });
-
-  var pageW = 210;
-  var pageH = 297;
-
-  var imgW = pageW;
-  var imgH = canvas.height * (imgW / canvas.width);
-
-  // 1ページ
-  if(imgH <= pageH){
-    var imgData1 = canvas.toDataURL("image/jpeg", 0.95);
-    pdf.addImage(imgData1, "JPEG", 0, 0, imgW, imgH);
-    pdf.save(filename);
-    return;
+  function doPdf(){
+    // PDF出力ボタン：帳票デザインをPDFファイルとして保存
+    L("pdf", "doPdf -> generate PDF (design)");
+    doPdfDownloadSameAsPrint();
   }
 
-  // 複数ページ：A4高さをpx換算してスライス
-  var pageHPx = Math.floor(canvas.width * (pageH / pageW));
-  var y = 0;
-  var pageIndex = 0;
-
-  while(y < canvas.height){
-    if(pageIndex > 0) pdf.addPage();
-
-    var sliceH = Math.min(pageHPx, canvas.height - y);
-
-    var c2 = document.createElement("canvas");
-    c2.width = canvas.width;
-    c2.height = sliceH;
-
-    var ctx = c2.getContext("2d");
-    ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-
-    var imgData = c2.toDataURL("image/jpeg", 0.95);
-    var sliceHmm = sliceH * (imgW / canvas.width);
-
-    pdf.addImage(imgData, "JPEG", 0, 0, imgW, sliceHmm);
-
-    y += sliceH;
-    pageIndex++;
-
-    // 念のため解放
-    c2.width = 1; c2.height = 1;
-  }
-
-  pdf.save(filename);
-}
-
-function doPdfDownloadSameAsPrint(){
-  L("pdf", "PDF生成開始（帳票デザインをPDF化）");
-
-  function createHiddenFrameWithHtml(html){
-    var iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.left = "-99999px";
-    iframe.style.top = "0";
-    iframe.style.width = "900px";
-    iframe.style.height = "1300px";
-    iframe.style.visibility = "hidden";
-    iframe.setAttribute("aria-hidden", "true");
-    document.body.appendChild(iframe);
-
-    var doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    return iframe;
-  }
-
-  function removeFrame(iframe){
-    try{ if(iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); }catch(e){}
-  }
-
-  ensurePdfLibs().then(function(){
-    // ★帳票HTMLを生成（印刷と同じソース）
-    var data = collectPrintData();
-    var html = buildPrintHtml(data);
-
-    var iframe = createHiddenFrameWithHtml(html);
-
-    // レイアウト確定を少し待つ（フォント/描画）
-    return new Promise(function(resolve, reject){
-      setTimeout(function(){
-        try{
-          var body = iframe.contentWindow.document.body;
-          window.html2canvas(body, {
-            backgroundColor: "#ffffff",
-            scale: 2,
-            useCORS: true
-          }).then(function(canvas){
-            resolve({ canvas: canvas, iframe: iframe, data: data });
-          }).catch(function(err){
-            reject({ err: err, iframe: iframe });
-          });
-        }catch(e){
-          reject({ err: e, iframe: iframe });
-        }
-      }, 400);
-    });
-  }).then(function(res){
-    try{
-      var bidNo = (res.data && res.data.bidNo) ? (""+res.data.bidNo) : "";
-      var fn = "入札書_" + safeFileName(bidNo || "bid") + "_" + fmtNow() + ".pdf";
-      canvasToPdfAndSave(res.canvas, fn);
-      L("pdf", "PDF保存完了: " + fn);
-    }finally{
-      removeFrame(res.iframe);
-    }
-  }).catch(function(pack){
-    var err = pack && pack.err ? pack.err : pack;
-    var iframe = pack && pack.iframe ? pack.iframe : null;
-
-    L("pdf", "PDF生成失敗: " + (err && err.message ? err.message : err));
-    removeFrame(iframe);
-
-    // 保険：印刷ダイアログ（ここからPDF保存も可能）
-    alert("PDF生成に失敗したため、印刷ダイアログでPDF保存してください。");
-    try{ openPrintWindowAndPrint(); }catch(e2){ try{ window.print(); }catch(e3){} }
-  });
-}
-
-
-
-
-
-
-
-
-
-  
-function doPdf(){
-  // PDF出力ボタン：印刷と同じ内容をPDFファイルとして保存
-  L("pdf", "doPdf -> generate PDF (same as current print)");
-  doPdfDownloadSameAsPrint();
-}
-
-  // 印刷ボタンも「帳票デザイン」に寄せたい場合はここを使う
   function doPrintDesign(){
+    // 互換用に残す（UIからは消してOK）
     L("print", "doPrintDesign -> open print layout window");
     openPrintWindowAndPrint();
   }
