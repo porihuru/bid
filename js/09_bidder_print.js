@@ -226,7 +226,7 @@
   function buildPrintHtml(data){
     // data: { title, bidNo, createdAt, toLines[], profile{}, outlineLine, deliveryLine, items[] }
     var css = ''
-      + '@page{ size:A4 portrait; margin:12mm 10mm; }'
+      + '@page{ size:A4 portrait; margin:12mm 10mm 12mm 20mm; }'
       + 'html,body{ height:auto; }'
       + 'body{ font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; color:#0f172a; background:#fff; }'
       + '.sheet{ width:100%; }'
@@ -549,12 +549,203 @@
     try{ window.print(); }catch(e){}
   }
 
-  function doPdf(){
-    // PDF出力ボタン（帳票デザイン版の印刷ページを作って印刷）
-    // ブラウザ/OS側の「PDFとして保存」を利用
-    L("pdf", "doPdf -> open print layout window");
-    openPrintWindowAndPrint();
+// =========================================================
+// [PDF-A] PDF生成（今の画面＝印刷しているものと同じ）をPDF保存する
+//   - html2canvas + jsPDF をCDNから動的ロード（index.htmlは触らない）
+//   - 失敗時は window.print() にフォールバック（PDF保存は印刷ダイアログで）
+// =========================================================
+function loadScript(url){
+  return new Promise(function(resolve, reject){
+    try{
+      var s = document.createElement("script");
+      s.src = url;
+      s.onload = function(){ resolve(); };
+      s.onerror = function(){ reject(new Error("load failed: " + url)); };
+      document.head.appendChild(s);
+    }catch(e){ reject(e); }
+  });
+}
+
+function ensurePdfLibs(){
+  return new Promise(function(resolve, reject){
+    try{
+      var hasH2C  = (typeof window.html2canvas === "function");
+      var hasJsPDF= !!(window.jspdf && window.jspdf.jsPDF);
+      if(hasH2C && hasJsPDF){ resolve(); return; }
+    }catch(e){}
+
+    var URL_H2C   = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    var URL_JSPDF = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+
+    loadScript(URL_H2C)
+      .then(function(){ return loadScript(URL_JSPDF); })
+      .then(function(){
+        try{
+          if(typeof window.html2canvas === "function" && window.jspdf && window.jspdf.jsPDF){
+            resolve();
+          }else{
+            reject(new Error("pdf libs not available after load"));
+          }
+        }catch(e){ reject(e); }
+      })
+      .catch(reject);
+  });
+}
+
+function safeFileName(s){
+  s = (s == null) ? "" : (""+s);
+  return s.replace(/[\\\/:\*\?"<>\|]/g, "_");
+}
+
+function fmtNow(){
+  try{
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = ("0"+(d.getMonth()+1)).slice(-2);
+    var da= ("0"+d.getDate()).slice(-2);
+    return y + m + da;
+  }catch(e){
+    return "date";
   }
+}
+
+function canvasToPdfAndSave(canvas, filename){
+  var jsPDF = window.jspdf.jsPDF;
+  var pdf = new jsPDF({ orientation:"p", unit:"mm", format:"a4" });
+
+  var pageW = 210;
+  var pageH = 297;
+
+  var imgW = pageW;
+  var imgH = canvas.height * (imgW / canvas.width);
+
+  // 1ページ
+  if(imgH <= pageH){
+    var imgData1 = canvas.toDataURL("image/jpeg", 0.95);
+    pdf.addImage(imgData1, "JPEG", 0, 0, imgW, imgH);
+    pdf.save(filename);
+    return;
+  }
+
+  // 複数ページ：A4高さをpx換算してスライス
+  var pageHPx = Math.floor(canvas.width * (pageH / pageW));
+  var y = 0;
+  var pageIndex = 0;
+
+  while(y < canvas.height){
+    if(pageIndex > 0) pdf.addPage();
+
+    var sliceH = Math.min(pageHPx, canvas.height - y);
+
+    var c2 = document.createElement("canvas");
+    c2.width = canvas.width;
+    c2.height = sliceH;
+
+    var ctx = c2.getContext("2d");
+    ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+    var imgData = c2.toDataURL("image/jpeg", 0.95);
+    var sliceHmm = sliceH * (imgW / canvas.width);
+
+    pdf.addImage(imgData, "JPEG", 0, 0, imgW, sliceHmm);
+
+    y += sliceH;
+    pageIndex++;
+
+    // 念のため解放
+    c2.width = 1; c2.height = 1;
+  }
+
+  pdf.save(filename);
+}
+
+function doPdfDownloadSameAsPrint(){
+  L("pdf", "PDF生成開始（帳票デザインをPDF化）");
+
+  function createHiddenFrameWithHtml(html){
+    var iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-99999px";
+    iframe.style.top = "0";
+    iframe.style.width = "900px";
+    iframe.style.height = "1300px";
+    iframe.style.visibility = "hidden";
+    iframe.setAttribute("aria-hidden", "true");
+    document.body.appendChild(iframe);
+
+    var doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    return iframe;
+  }
+
+  function removeFrame(iframe){
+    try{ if(iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); }catch(e){}
+  }
+
+  ensurePdfLibs().then(function(){
+    // ★帳票HTMLを生成（印刷と同じソース）
+    var data = collectPrintData();
+    var html = buildPrintHtml(data);
+
+    var iframe = createHiddenFrameWithHtml(html);
+
+    // レイアウト確定を少し待つ（フォント/描画）
+    return new Promise(function(resolve, reject){
+      setTimeout(function(){
+        try{
+          var body = iframe.contentWindow.document.body;
+          window.html2canvas(body, {
+            backgroundColor: "#ffffff",
+            scale: 2,
+            useCORS: true
+          }).then(function(canvas){
+            resolve({ canvas: canvas, iframe: iframe, data: data });
+          }).catch(function(err){
+            reject({ err: err, iframe: iframe });
+          });
+        }catch(e){
+          reject({ err: e, iframe: iframe });
+        }
+      }, 400);
+    });
+  }).then(function(res){
+    try{
+      var bidNo = (res.data && res.data.bidNo) ? (""+res.data.bidNo) : "";
+      var fn = "入札書_" + safeFileName(bidNo || "bid") + "_" + fmtNow() + ".pdf";
+      canvasToPdfAndSave(res.canvas, fn);
+      L("pdf", "PDF保存完了: " + fn);
+    }finally{
+      removeFrame(res.iframe);
+    }
+  }).catch(function(pack){
+    var err = pack && pack.err ? pack.err : pack;
+    var iframe = pack && pack.iframe ? pack.iframe : null;
+
+    L("pdf", "PDF生成失敗: " + (err && err.message ? err.message : err));
+    removeFrame(iframe);
+
+    // 保険：印刷ダイアログ（ここからPDF保存も可能）
+    alert("PDF生成に失敗したため、印刷ダイアログでPDF保存してください。");
+    try{ openPrintWindowAndPrint(); }catch(e2){ try{ window.print(); }catch(e3){} }
+  });
+}
+
+
+
+
+
+
+
+
+
+  
+function doPdf(){
+  // PDF出力ボタン：印刷と同じ内容をPDFファイルとして保存
+  L("pdf", "doPdf -> generate PDF (same as current print)");
+  doPdfDownloadSameAsPrint();
+}
 
   // 印刷ボタンも「帳票デザイン」に寄せたい場合はここを使う
   function doPrintDesign(){
