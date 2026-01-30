@@ -1,28 +1,26 @@
-/* [JST 2026-01-24 21:20]  03_bidder_log.js v20260124-02
+/* [JST 2026-01-30 21:00]  03_bidder_log.js v20260130-01
    変更点:
-   - ログ表示は append-only（追記）に統一（再描画しない）
-   - ログ欄をタップ(フォーカス)したら自動でログ停止（コピー/選択を邪魔しない）
-   - [ログ停止/再開] ボタン用 API 追加
-   - [ログコピー] ボタン用 API 追加（iOS/Edge95 fallback 対応）
-   - window.onerror / unhandledrejection をログに出す
+   - ログは常に継続記録（停止/再開機能を無効化）
+   - ログ欄 focus/blur しても停止しない（記録のみ）
+   - setPaused/togglePaused は互換のため残すが、常に pause=false 固定
+   - window.onerror / unhandledrejection をログに出す（従来どおり）
 */
 (function(){
   var FILE = "03_bidder_log.js";
-  var VER  = "v20260124-02";
+  var VER  = "v20260130-01";
   var TS   = new Date().toISOString();
 
   var _ta = null;           // textarea element
   var _lines = [];          // 全ログ（内部保持）
-  var _paused = false;      // 表示更新停止フラグ
+  var _paused = false;      // ★常に false 運用（互換のため変数は残す）
   var _maxLines = 5000;     // 無限増殖防止（必要なら増やせます）
   var _lastLine = "";       // 直近行（同一連打の抑制に使う場合あり）
 
   function _pad2(n){ return (n<10) ? ("0"+n) : (""+n); }
 
   function _nowJstStamp(){
-    // 表示用：JST固定（iPhoneでも見やすい）
+    // 表示用：JST固定（端末TZそのまま。JST運用前提）
     var d = new Date();
-    // 端末のタイムゾーンをそのまま使う（JST運用前提）
     return d.getFullYear() + "-" + _pad2(d.getMonth()+1) + "-" + _pad2(d.getDate())
       + " " + _pad2(d.getHours()) + ":" + _pad2(d.getMinutes()) + ":" + _pad2(d.getSeconds())
       + "." + ("00"+d.getMilliseconds()).slice(-3);
@@ -30,17 +28,16 @@
 
   function _appendToTextarea(line){
     if(!_ta) return;
-    // 追記のみ（全置換しない＝選択を邪魔しにくい）
-    // ただし停止中は表示更新しない
-    if(_paused) return;
 
+    // ★修正★ 停止しない（常に追記）
+    // 追記のみ（全置換しない＝選択を邪魔しにくい）
     try{
       if(_ta.value){
         _ta.value += "\n" + line;
       }else{
         _ta.value = line;
       }
-      // 自動スクロール（停止中は動かさない）
+      // 自動スクロール（常に追従）
       _ta.scrollTop = _ta.scrollHeight;
     }catch(e){
       // 最悪 console へ
@@ -52,8 +49,7 @@
     _lines.push(line);
     if(_lines.length > _maxLines){
       _lines.shift(); // 先頭を捨てる
-      // textarea も再構築が必要だが、頻繁にやると本末転倒なので最低限にする
-      // ここでは「捨てた」ことだけ記録し、表示は追記のままにする（必要なら後で改善）
+      // textarea 側も理想は再構築だが、重くなるのでここではしない
     }
   }
 
@@ -79,34 +75,36 @@
     if(_ta){
       try{ _ta.value = ""; }catch(e){}
     }
+    // ★停止状態も無効（常にfalse）
+    _paused = false;
   }
 
   function bindTextArea(textareaEl){
     _ta = textareaEl;
 
-    // ログ欄をタップしたら自動停止（選択/コピーを邪魔しない）
+    // ★修正★ ログ欄をタップ(フォーカス)しても停止しない
+    // （選択/コピーの邪魔をしない目的なら、停止ではなく UI 側で対応する）
     if(_ta){
       _ta.addEventListener("focus", function(){
-        _paused = true;
-        // 停止を明示ログ（ただし停止中はtextareaに出ないので内部保持のみ）
-        _pushLine("[" + _nowJstStamp() + "] [log] auto-paused (textarea focused)");
+        _pushLine("[" + _nowJstStamp() + "] [log] textarea focused");
       });
       _ta.addEventListener("blur", function(){
-        // blurしても自動再開はしない（ユーザーが意図せず動くのを防ぐ）
-        _pushLine("[" + _nowJstStamp() + "] [log] textarea blurred (still paused until resumed)");
+        _pushLine("[" + _nowJstStamp() + "] [log] textarea blurred");
       });
     }
   }
 
   function setPaused(flag){
-    _paused = !!flag;
-    write("log", _paused ? "paused" : "resumed");
+    // ★修正★ 互換のためAPIは残すが、停止は無効
+    _paused = false;
+    write("log", "setPaused requested but disabled (always running)");
   }
 
   function togglePaused(){
-    _paused = !_paused;
-    write("log", _paused ? "paused" : "resumed");
-    return _paused;
+    // ★修正★ 互換のためAPIは残すが、停止は無効
+    _paused = false;
+    write("log", "togglePaused requested but disabled (always running)");
+    return _paused; // 常に false
   }
 
   function getAllText(){
@@ -194,8 +192,8 @@
     write: write,
     clear: clear,
     bindTextArea: bindTextArea,
-    setPaused: setPaused,
-    togglePaused: togglePaused,
+    setPaused: setPaused,         // ★互換用（停止は無効）
+    togglePaused: togglePaused,   // ★互換用（停止は無効）
     copyAll: copyAll,
     getAllText: getAllText,
     installGlobalErrorHook: installGlobalErrorHook
