@@ -1,9 +1,15 @@
-/* [JST 2026-01-24 22:10]  10_bidder_app.js v20260124-01 */
+/* [JST 2026-01-30 22:35]  10_bidder_app.js v20260130-01
+   変更点（最小修正方針）:
+   - bids/{bidNo} のデータを S.bidHeader に保持し、BidderState にも渡す（PDF/09が拾えるように）
+   - 読み込んだヘッダー（to1/to2/to3/bidDate/deliveryPlace/dueDate/note 等）をログに必ず出す
+   - ログ停止/再開（pointerdown等で止まる）を完全無効化（ログは常時継続）
+   - txtLog があれば 03_bidder_log.js の bindTextArea を呼んで接続（BOOTLOGも残る）
+*/
 (function(){
   "use strict";
 
   var FILE = "10_bidder_app.js";
-  var VER  = "v20260125-01";
+  var VER  = "v20260130-01";
   var TS   = new Date().toISOString();
 
   // =========================================================
@@ -20,6 +26,24 @@
       console.log("[" + tag + "] " + msg);
     }catch(e){
       try{ console.log("[" + tag + "] " + msg); }catch(ex){}
+    }
+  }
+
+  // JSONをログに出す（03側に writeJson があれば使う）
+  function LJ(tag, obj){
+    try{
+      if(window.BidderLog && (window.BidderLog.writeJson || window.BidderLog.writeObj)){
+        var fn = window.BidderLog.writeJson || window.BidderLog.writeObj;
+        return fn(tag, obj);
+      }
+    }catch(e){}
+    // fallback（長すぎ防止）
+    try{
+      var s = JSON.stringify(obj, null, 2);
+      if(s && s.length > 8000) s = s.slice(0, 8000) + "\n... (truncated)";
+      L(tag, s);
+    }catch(ex){
+      L(tag, "[json error] " + toStr(ex));
     }
   }
 
@@ -82,8 +106,9 @@
   var S = {
     bidNo: "",
     bidStatus: "",
-    authState: "LOCKED",    // LOCKED / UNLOCKED
-    loginState: "SIGNED-OUT", // SIGNED-IN / SIGNED-OUT
+    bidHeader: null,         // ★追加：bids/{bidNo} 全体（to1/to2/...などを保持）
+    authState: "LOCKED",     // LOCKED / UNLOCKED
+    loginState: "SIGNED-OUT",// SIGNED-IN / SIGNED-OUT
     viewOnly: false,
     inputEnabled: false,
     lastLoadedAt: "",
@@ -98,8 +123,20 @@
 
   function syncToBidderState(){
     try{
-      if(!window.BidderState || !window.BidderState.set) return;
-      window.BidderState.set(S);
+      if(window.BidderState){
+        // 02側APIがあれば使う
+        if(typeof window.BidderState.set === "function"){
+          window.BidderState.set(S);
+        }
+        if(typeof window.BidderState.setBidHeader === "function"){
+          window.BidderState.setBidHeader(S.bidHeader || null);
+        }else{
+          // 02側が state.bidHeader を見ている可能性に備えて入れておく（壊さない）
+          if(window.BidderState.state && typeof window.BidderState.state === "object"){
+            window.BidderState.state.bidHeader = (S.bidHeader || null);
+          }
+        }
+      }
     }catch(e){}
   }
 
@@ -108,7 +145,6 @@
       if(!window.BidderState || !window.BidderState.get) return;
       var s2 = window.BidderState.get();
       if(s2 && typeof s2 === "object"){
-        // 既存stateに寄せる（あるものだけ）
         if(s2.bidNo) S.bidNo = s2.bidNo;
         if(s2.bidStatus) S.bidStatus = s2.bidStatus;
         if(s2.authState) S.authState = s2.authState;
@@ -118,8 +154,36 @@
         if(s2.bidderId) S.bidderId = s2.bidderId;
         if(s2.bidderEmail) S.bidderEmail = s2.bidderEmail;
         if(s2.userUid) S.userUid = s2.userUid;
+
+        // bidHeader も拾えるなら拾う
+        if(s2.bidHeader) S.bidHeader = s2.bidHeader;
       }
     }catch(e){}
+  }
+
+  function setBidHeader(hdr){
+    S.bidHeader = hdr || null;
+    // PDF側が拾うため、BidderStateにも即反映
+    syncToBidderState();
+
+    // ログに必ず出す（必要な項目が取れているか確認）
+    try{
+      if(!hdr){
+        L("hdr", "bidHeader=null");
+        return;
+      }
+      // まず要点
+      var to1 = hdr.to1 || "";
+      var to2 = hdr.to2 || "";
+      var to3 = hdr.to3 || "";
+      L("hdr", "to1=" + to1 + " / to2=" + to2 + " / to3=" + to3);
+      L("hdr", "bidDate=" + (hdr.bidDate||"") + " / deliveryPlace=" + (hdr.deliveryPlace||"") + " / dueDate=" + (hdr.dueDate||""));
+      L("hdr", "note=" + (hdr.note||""));
+      // 全体も出す（長い場合は03側でtruncateされる）
+      LJ("hdrFull", hdr);
+    }catch(e){
+      L("hdr", "log header failed: " + toStr(e));
+    }
   }
 
   // =========================================================
@@ -134,13 +198,11 @@
   }
 
   function ensureFirebaseInit(){
-    // [APP-03-01] SDKが無い → ここで確定的にログを出す
     if(!firebaseReady()){
       L("fatal", "Firebase SDK が読み込まれていません。index.html の firebase-*-compat.js 読み込みを確認してください。");
       throw new Error("Firebase SDK missing");
     }
 
-    // [APP-03-02] configが未設定 → ここで止める（YOUR_...のままだと当然動かない）
     if(!window.BidderConfig || !window.BidderConfig.FIREBASE_CONFIG){
       L("fatal", "BidderConfig.FIREBASE_CONFIG が見つかりません（01_bidder_config.js を確認）");
       throw new Error("Missing BidderConfig");
@@ -153,7 +215,6 @@
       throw new Error("Firebase config placeholder");
     }
 
-    // [APP-03-03] 初期化済みならスキップ
     try{
       if(window.firebase.apps && window.firebase.apps.length){
         L("fb", "firebase already initialized (apps=" + window.firebase.apps.length + ")");
@@ -161,7 +222,6 @@
       }
     }catch(e){}
 
-    // [APP-03-04] 初期化
     try{
       window.firebase.initializeApp(cfg);
       L("fb", "firebase initialized");
@@ -175,25 +235,13 @@
   // =========================================================
   // [APP-04] Firestore直アクセス（04_bidder_db.js 不要でも読める）
   // =========================================================
-  function db(){
-    return window.firebase.firestore();
-  }
+  function db(){ return window.firebase.firestore(); }
 
-  function bidDocRef(bidNo){
-    return db().collection("bids").doc(bidNo);
-  }
-
-  function itemsColRef(bidNo){
-    return bidDocRef(bidNo).collection("items");
-  }
-
-  function offerDocRef(bidNo, bidderId){
-    return bidDocRef(bidNo).collection("offers").doc(bidderId);
-  }
+  function bidDocRef(bidNo){ return db().collection("bids").doc(bidNo); }
+  function itemsColRef(bidNo){ return bidDocRef(bidNo).collection("items"); }
+  function offerDocRef(bidNo, bidderId){ return bidDocRef(bidNo).collection("offers").doc(bidderId); }
 
   function loadBidAndItems(){
-    // [APP-04-01] bids/{bidNo} を取得 → status表示
-    // [APP-04-02] bids/{bidNo}/items を取得 → テーブル表示
     var bidNo = S.bidNo;
     if(!bidNo){
       throw new Error("bidNo が空です（URL ?bidNo=XXXX か 01_bidder_config.js の既定値を確認）");
@@ -207,6 +255,10 @@
         throw new Error("bids/" + bidNo + " が存在しません");
       }
       var data = snap.data() || {};
+
+      // ★重要：bidHeaderとして保持（PDFが拾う）
+      setBidHeader(data);
+
       S.bidStatus = data.status || "";
       L("load", "bid status=" + S.bidStatus);
 
@@ -217,7 +269,6 @@
       var arr = [];
       qs.forEach(function(doc){
         var d = doc.data() || {};
-        // 期待: seq, name, spec, qty, unit, note 等（無ければ空で表示）
         arr.push({
           id: doc.id,
           seq: d.seq,
@@ -231,12 +282,21 @@
       S.items = arr;
       S.lastLoadedAt = t0;
       L("load", "items=" + arr.length);
+
+      // itemsの先頭数件もログ（確認用）
+      try{
+        var peek = [];
+        for(var i=0;i<Math.min(5, arr.length); i++){
+          peek.push(arr[i]);
+        }
+        LJ("itemsPeek", peek);
+      }catch(e){}
+
       return true;
     });
   }
 
   function loadMyOfferIfAny(){
-    // [APP-04-03] 自分の offers を読めるのはルール上 open/closed のとき
     if(!S.bidNo || !S.bidderId) return Promise.resolve(false);
     return offerDocRef(S.bidNo, S.bidderId).get().then(function(snap){
       if(!snap.exists){
@@ -254,7 +314,6 @@
       L("offer", "loaded existing offer lines=" + Object.keys(S.prices).length);
       return true;
     }).catch(function(e){
-      // ここは権限で落ちる可能性もあるので“致命”にはしない
       L("offer", "load offer skipped/failed: " + toStr(e));
       return false;
     });
@@ -317,7 +376,6 @@
     }
     tb.innerHTML = html;
 
-    // 入力イベント（pricesに反映）
     var inputs = tb.querySelectorAll("input[data-seq]");
     for(var j=0;j<inputs.length;j++){
       inputs[j].addEventListener("input", function(ev){
@@ -350,121 +408,101 @@
   }
 
   // =========================================================
-  // [APP-07] ログUI（停止/コピー/クリア）
+  // [APP-07] ログUI（クリア/コピー）
+  //   ※停止/再開はしない（ログは常時）
   // =========================================================
-  var logPaused = false;
-
   function hookLogTextarea(){
     var ta = $("txtLog");
     if(!ta) return;
 
-    // BOOTLOG バッファをまず反映
-    if(window.BOOTLOG && window.BOOTLOG.flushTo){
-      window.BOOTLOG.flushTo(ta);
+    // BOOTLOG バッファを先に反映（初期エラーが見える）
+    try{
+      if(window.BOOTLOG && window.BOOTLOG.flushTo){
+        window.BOOTLOG.flushTo(ta);
+      }
+    }catch(e){}
+
+    // 03_bidder_log.js があれば textarea に接続（ここが重要）
+    try{
+      if(window.BidderLog && window.BidderLog.bindTextArea){
+        window.BidderLog.bindTextArea(ta);
+        L("ui", "BidderLog.bindTextArea OK");
+      }
+    }catch(e){
+      L("ui", "BidderLog.bindTextArea FAILED: " + toStr(e));
     }
 
-    // 03_bidder_log.js があるなら、そこに textarea を接続しているはずだが、
-    // 無い/不完全でも、APP側で最低限動くようにする
+    // 03が無い/壊れている場合の最低限フォールバック
     try{
-      if(!window.BidderLog){
-        window.BidderLog = {};
-      }
-      if(!window.BidderLog.__appFallback){
-        window.BidderLog.__appFallback = { buf: [] };
-      }
+      if(!window.BidderLog){ window.BidderLog = {}; }
+      if(!window.BidderLog.__appFallback){ window.BidderLog.__appFallback = {}; }
       if(!window.BidderLog.write){
         window.BidderLog.write = function(tag, msg){
           var line = "[" + nowIso() + "] [" + tag + "] " + msg;
-          if(logPaused){
-            window.BidderLog.__appFallback.buf.push(line);
-            return;
-          }
-          ta.value += line + "\n";
-          ta.scrollTop = ta.scrollHeight;
-          try{ console.log(line); }catch(e){}
+          try{
+            ta.value += line + "\n";
+            ta.scrollTop = ta.scrollHeight;
+          }catch(e){}
+          try{ console.log(line); }catch(ex){}
         };
       }
     }catch(e){}
 
-    // textareaタップで自動停止（コピーしやすく）
-    ta.addEventListener("pointerdown", function(){
-      setLogPaused(true);
-    });
-    ta.addEventListener("touchstart", function(){
-      setLogPaused(true);
-    });
-
-    L("ui", "log textarea hooked");
-  }
-
-  function setLogPaused(v){
-    logPaused = !!v;
-    var btn = $("btnLogPause");
-    if(btn) btn.textContent = logPaused ? "ログ再開" : "ログ停止";
-    try{
-      if(window.BOOTLOG && window.BOOTLOG.pause) window.BOOTLOG.pause(logPaused);
-    }catch(e){}
-    L("log", logPaused ? "paused" : "resumed");
-
-    // paused中に溜めた分を再開時に吐く
-    if(!logPaused){
-      try{
-        var ta = $("txtLog");
-        var buf = window.BidderLog && window.BidderLog.__appFallback && window.BidderLog.__appFallback.buf;
-        if(ta && buf && buf.length){
-          ta.value += buf.join("\n") + "\n";
-          window.BidderLog.__appFallback.buf = [];
-          ta.scrollTop = ta.scrollHeight;
-        }
-      }catch(e){}
-    }
+    L("ui", "log textarea hooked (always-on)");
   }
 
   function clearLog(){
-    var ta = $("txtLog");
-    if(ta) ta.value = "";
-    // BOOTLOGは保持（初期エラー消すと原因追えない）→必要ならここで消す設計に変更可
-    L("log", "cleared");
+    // 03があればそっちを優先
+    try{
+      if(window.BidderLog && window.BidderLog.clear){
+        window.BidderLog.clear();
+      }else{
+        var ta = $("txtLog");
+        if(ta) ta.value = "";
+      }
+      L("log", "cleared");
+    }catch(e){
+      L("log", "clear failed: " + toStr(e));
+    }
   }
 
   function copyLog(){
-    var ta = $("txtLog");
-    if(!ta) return;
+    // 03があれば copyAll を優先（Edge/iOSも含めて対策済）
+    try{
+      if(window.BidderLog && window.BidderLog.copyAll){
+        return window.BidderLog.copyAll().then(function(ok){
+          if(ok){
+            showMsg("ok", "コピー完了", "ログをクリップボードにコピーしました。");
+          }else{
+            showMsg("err", "コピー失敗", "ブラウザ制限で自動コピーできません。\nログ欄を長押しして選択→コピーしてください。");
+          }
+          return ok;
+        });
+      }
+    }catch(e){}
 
-    setLogPaused(true);
-
-    var text = ta.value || "";
-    if(!text){
-      showMsg("err", "コピー失敗", "ログが空です。先に再読込/ログイン等を実行してください。");
-      return;
-    }
-
-    function ok(){
-      showMsg("ok", "コピー完了", "ログをクリップボードにコピーしました。");
-      L("log", "copy OK");
-    }
-    function ng(e){
-      showMsg("err", "コピー失敗", "ブラウザ制限で自動コピーできません。\nログ欄を長押しして選択→コピーしてください。\n\n" + toStr(e));
-      L("log", "copy FAILED: " + toStr(e));
-    }
-
-    // iOS Safari: clipboard API が使えない場合があるので execCommand フォールバック
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(text).then(ok).catch(function(e){
-        try{
-          ta.focus();
-          ta.select();
-          var r = document.execCommand("copy");
-          if(r) ok(); else ng(e);
-        }catch(ex){ ng(ex); }
-      });
-    }else{
-      try{
-        ta.focus();
-        ta.select();
-        var r2 = document.execCommand("copy");
-        if(r2) ok(); else ng(new Error("execCommand copy failed"));
-      }catch(ex2){ ng(ex2); }
+    // fallback
+    try{
+      var ta = $("txtLog");
+      var text = ta ? (ta.value || "") : "";
+      if(!text){
+        showMsg("err", "コピー失敗", "ログが空です。");
+        return Promise.resolve(false);
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        return navigator.clipboard.writeText(text).then(function(){
+          showMsg("ok", "コピー完了", "ログをクリップボードにコピーしました。");
+          return true;
+        }).catch(function(){
+          showMsg("err", "コピー失敗", "ログ欄を長押しして選択→コピーしてください。");
+          return false;
+        });
+      }
+      showMsg("err", "コピー失敗", "ログ欄を長押しして選択→コピーしてください。");
+      return Promise.resolve(false);
+    }catch(ex){
+      showMsg("err", "コピー失敗", toStr(ex));
+      return Promise.resolve(false);
     }
   }
 
@@ -485,7 +523,6 @@
   }
 
   function validateProfile(p){
-    // ルール validOffer() の必須キーに合わせる（空文字自体はルールで禁止していないが、運用で必須）
     var miss = [];
     if(!p.email) miss.push("メールアドレス");
     if(!p.address) miss.push("住所");
@@ -503,19 +540,15 @@
   function buildOfferDoc(){
     var p = getProfileFromInputs();
     var v = validateProfile(p);
-    if(v){
-      throw new Error(v);
-    }
+    if(v){ throw new Error(v); }
     if(!S.bidNo) throw new Error("bidNo が空です");
     if(!S.bidderId) throw new Error("bidderId が空です（先にログインしてください）");
 
-    // lines: seq -> unitPriceStr
     var lines = {};
     var seqs = Object.keys(S.prices || {});
     for(var i=0;i<seqs.length;i++){
       var k = seqs[i];
       var val = (S.prices[k] == null) ? "" : ("" + S.prices[k]).trim();
-      // 空は送らない運用にする（必要なら空も送る）
       if(val !== "") lines[k] = val;
     }
 
@@ -551,7 +584,6 @@
     return ref.get().then(function(snap){
       var doc = buildOfferDoc();
       if(snap.exists){
-        // 既存 createdAt は保持
         try{
           var old = snap.data() || {};
           if(old.createdAt) doc.createdAt = old.createdAt;
@@ -585,10 +617,8 @@
     L("ui", "login clicked bidderId=" + bidderId);
 
     return window.BidderAuth.signIn(bidderId, pass).then(function(u){
-      // user反映（05側でstateを更新している前提だが、念のためここでも）
       S.bidderId = bidderId;
       try{
-        // 05_bidder_auth.js の bidderIdToEmail と整合させる
         var dom = (window.BidderConfig && window.BidderConfig.BIDDER_EMAIL_DOMAIN) ? window.BidderConfig.BIDDER_EMAIL_DOMAIN : "@bid.local";
         S.bidderEmail = bidderId + dom;
       }catch(e){}
@@ -599,7 +629,6 @@
 
       renderAll();
 
-      // ログイン後にoffers読み込み（可能なら）
       return loadMyOfferIfAny().then(function(){
         renderAll();
         return true;
@@ -658,22 +687,22 @@
   }
 
   // =========================================================
-  // [APP-11] 再読込
+  // [APP-11] 再読込（起動時に自動実行）
   // =========================================================
   function doReloadAll(){
     hideMsg();
-    L("ui", "reload clicked");
+    L("ui", "reload start");
 
     return Promise.resolve().then(function(){
       ensureFirebaseInit();
       return loadBidAndItems();
     }).then(function(){
-      // open/closed でoffers読み込み可否が変わる
       return loadMyOfferIfAny();
     }).then(function(){
       recomputeMode();
       renderAll();
       showMsg("ok", "再読込 完了", "入札データを読み込みました。");
+      L("ui", "reload done");
       return true;
     }).catch(function(e){
       var msg = toStr(e);
@@ -694,7 +723,6 @@
       el.addEventListener(ev, function(){
         try{
           Promise.resolve().then(fn).catch(function(e){
-            // 例外は既に showMsg 済みの場合があるが、必ずログに残す
             L("err", id + " " + toStr(e));
           });
         }catch(ex){
@@ -705,8 +733,7 @@
     }
 
     on("btnLogClear", "click", function(){ clearLog(); });
-    on("btnLogPause", "click", function(){ setLogPaused(!logPaused); });
-    on("btnLogCopy",  "click", function(){ copyLog(); });
+    on("btnLogCopy",  "click", function(){ return copyLog(); });
 
     on("btnLoad", "click", function(){ return doReloadAll(); });
     on("btnLogin", "click", function(){ return doLogin(); });
@@ -724,7 +751,6 @@
       });
     });
 
-    // ここは既存JSに任せつつ、無ければログだけ出す
     on("btnProfileLoad", "click", function(){
       if(window.BidderProfile && window.BidderProfile.loadFromCookie){
         window.BidderProfile.loadFromCookie();
@@ -775,13 +801,11 @@
   }
 
   // =========================================================
-  // [APP-13] 起動（bidNo確定 → Firebase初期化 → 認証監視 → 初回読込）
+  // [APP-13] 起動（bidNo確定 → Firebase初期化 → 初回読込）
   // =========================================================
   function bootstrap(){
-    // [APP-13-01] DOM接続（ログ最優先）
     hookLogTextarea();
 
-    // [APP-13-02] bidNo 決定（URL優先→config既定）
     var b = getUrlParam("bidNo");
     if(!b && window.BidderConfig && window.BidderConfig.BID_NO_DEFAULT){
       b = window.BidderConfig.BID_NO_DEFAULT;
@@ -789,7 +813,6 @@
     S.bidNo = b || "";
     L("boot", "bidNo=" + (S.bidNo || "(empty)"));
 
-    // [APP-13-03] Firebase初期化（失敗理由を必ずログ化）
     try{
       ensureFirebaseInit();
     }catch(e){
@@ -798,7 +821,7 @@
       return;
     }
 
-    // [APP-13-04] auth監視（05があれば）
+    // auth監視（05があれば）
     try{
       if(window.BidderAuth && window.BidderAuth.watchAuthState){
         window.BidderAuth.watchAuthState();
@@ -810,7 +833,7 @@
       L("boot", "watchAuthState FAILED: " + toStr(e));
     }
 
-    // [APP-13-05] Firebaseの auth state を直接反映（05が不十分でも最低限合わせる）
+    // auth state を直接反映（05が不十分でも最低限合わせる）
     try{
       window.firebase.auth().onAuthStateChanged(function(user){
         if(user){
@@ -829,65 +852,55 @@
       L("auth", "onAuthStateChanged hook FAILED: " + toStr(e));
     }
 
-    // [APP-13-06] ボタン結線
     bindEvents();
 
-    // [APP-13-07] 初回読込（失敗しても必ずメッセージとログを残す）
-    doReloadAll().catch(function(){ /* 失敗表示済み */ });
+    // 初回読込（HTMLを開いたら自動で走る）
+    doReloadAll().catch(function(){});
   }
 
-  // DOM ready
   if(document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", bootstrap);
   }else{
     bootstrap();
   }
 
-// ★ 1/25 これを追加★ ------------------------------------------------------------
-// [MSG-MIRROR-01] 下部msgBoxの内容を上部msgBoxTopへミラー（既存処理は触らない）
-(function(){
-  function mirrorMsgBox(){
-    try{
-      var src = document.getElementById("msgBox");     // 既存（下部）
-      var dst = document.getElementById("msgBoxTop");  // 追加（上部）
-      if(!src || !dst) return;
-
-      function sync(){
-        // class / style / 中身を丸ごと同期（ok/errなどの見た目も一致）
-        dst.className = src.className;
-        dst.style.cssText = src.style.cssText;
-        dst.innerHTML = src.innerHTML;
-      }
-
-      // 初回同期
-      sync();
-
-      // 変更監視（テキスト更新・表示/非表示・クラス変更など）
-      var mo = new MutationObserver(function(){
-        sync();
-      });
-      mo.observe(src, { attributes:true, childList:true, subtree:true });
-
-    }catch(e){
-      // ここは壊れないように握りつぶし（ログがあるなら出す）
+  // ★ 1/25 これを追加★ ------------------------------------------------------------
+  // [MSG-MIRROR-01] 下部msgBoxの内容を上部msgBoxTopへミラー（既存処理は触らない）
+  (function(){
+    function mirrorMsgBox(){
       try{
-        if(window.BidderLog && window.BidderLog.write){
-          window.BidderLog.write("warn", "[MSG-MIRROR-01] failed: " + (e && e.message ? e.message : String(e)));
-        }else{
-          console.log("[MSG-MIRROR-01] failed:", e);
-        }
-      }catch(ex){}
-    }
-  }
+        var src = document.getElementById("msgBox");     // 既存（下部）
+        var dst = document.getElementById("msgBoxTop");  // 追加（上部）
+        if(!src || !dst) return;
 
-  // 10_bidder_app.js は body末尾で読み込まれているので DOM は基本できている想定。
-  // 念のため両対応（即時 / DOMContentLoaded）
-  if(document.readyState === "loading"){
-    document.addEventListener("DOMContentLoaded", mirrorMsgBox);
-  }else{
-    mirrorMsgBox();
-  }
-})();
- // 1/25 ★ここまで追加★ ----------------------------------------------------------
+        function sync(){
+          dst.className = src.className;
+          dst.style.cssText = src.style.cssText;
+          dst.innerHTML = src.innerHTML;
+        }
+
+        sync();
+
+        var mo = new MutationObserver(function(){ sync(); });
+        mo.observe(src, { attributes:true, childList:true, subtree:true });
+
+      }catch(e){
+        try{
+          if(window.BidderLog && window.BidderLog.write){
+            window.BidderLog.write("warn", "[MSG-MIRROR-01] failed: " + (e && e.message ? e.message : String(e)));
+          }else{
+            console.log("[MSG-MIRROR-01] failed:", e);
+          }
+        }catch(ex){}
+      }
+    }
+
+    if(document.readyState === "loading"){
+      document.addEventListener("DOMContentLoaded", mirrorMsgBox);
+    }else{
+      mirrorMsgBox();
+    }
+  })();
+  // 1/25 ★ここまで追加★ ----------------------------------------------------------
 
 })();
