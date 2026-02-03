@@ -1,7 +1,7 @@
 /* [JST 2026-01-24 21:00]  06_bidder_profile.js v20260124-01 */
 (function(){
   var FILE = "06_bidder_profile.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260203-01";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
@@ -62,6 +62,9 @@
     L("cookie", "save OK");
     return ok;
   }
+  
+  
+  
 
   function loadCookie(){
     // [PF-04] Cookie読込
@@ -95,4 +98,21 @@
     loadCookie: loadCookie,
     deleteCookie: deleteCookie
   };
+  
+    // ★ここを追加★ [PF-05-01] 起動時にCookieから自動復元（DOM生成後に実行）
+  try{
+    if(document.readyState === "loading"){
+      document.addEventListener("DOMContentLoaded", function(){
+        try{ loadCookie(); }catch(e){ L("cookie", "autoload FAILED"); }
+      });
+    }else{
+      // 既にDOMができている場合
+      try{ loadCookie(); }catch(e2){ L("cookie", "autoload FAILED"); }
+    }
+  }catch(ex){
+    L("cookie", "autoload FAILED");
+  }
+  // ★ここまで追加★
+  
+  
 })();
