@@ -95,6 +95,12 @@
     readProfileFromUI: readProfileFromUI,
     writeProfileToUI: writeProfileToUI,
     saveCookie: saveCookie,
+    
+    // ★ここを追加★ [PF-06-01] 互換alias（呼び出し側が saveToCookie を使うため）
+    saveToCookie: saveCookie,
+    loadFromCookie: loadCookie,
+    // ★ここまで追加★
+    
     loadCookie: loadCookie,
     deleteCookie: deleteCookie
   };
