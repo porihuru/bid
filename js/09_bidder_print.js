@@ -187,7 +187,7 @@
 
         // offer lines（可能なら）
         if(!bidderId){
-          return { header: header, items: items, bidderId: "", lines: {} };
+          return { header: header, items: items, bidderId: "", lines: {}, profile: null };
         }
 //
         // [P20-xx] offer lines（可能なら）←このブロックを置き換え
