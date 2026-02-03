@@ -17,7 +17,7 @@
   // [P00] メタ/ロガー
   // =========================================================
   var FILE = "09_bidder_print.js";
-  var VER  = "v20260202-MIN02";
+  var VER  = "v20260203-MIN01";
   var TS   = new Date().toISOString();
 
   function _toStr(x){
