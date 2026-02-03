@@ -619,7 +619,12 @@ y += 84 + secGap;
 
       // データ取得
       return loadBidData(bidNo).then(function(data){
-        // 追加ログ（必要最低限）
+   
+  // ★ここに追加★
+  L("pdfData", "profile=" + JSON.stringify((data && data.profile) ? data.profile : null));
+        
+              
+      // 追加ログ（必要最低限）
         try{
           var h = data.header || {};
           L("pdfData", "to=" + [h.to1,h.to2,h.to3].filter(Boolean).join(" / "));
