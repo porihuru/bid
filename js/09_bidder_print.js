@@ -143,7 +143,9 @@
         bidderId = (s && s.bidderId) ? ("" + s.bidderId) : "";
       }
     }catch(e){}
-
+    
+    // ★ここに追加★  ← [P20-01-02]
+　　　L("pdfData", "bidderId=" + (bidderId || "(empty)"));
     L("pdfData", "bidNo=" + bidNo);
 
     var bidRef = db.collection("bids").doc(bidNo);
