@@ -189,19 +189,24 @@
         if(!bidderId){
           return { header: header, items: items, bidderId: "", lines: {} };
         }
-
-        return bidRef.collection("offers").doc(bidderId).get()
-          .then(function(os){
-            if(!os.exists) return { header: header, items: items, bidderId: bidderId, lines: {} };
-            var od = os.data() || {};
-            var lines = od.lines || {};
-            return { header: header, items: items, bidderId: bidderId, lines: lines };
-          })
-          .catch(function(e){
-            // 権限等で読めなくてもPDFは作る（単価が空になるだけ）
-            L("pdfData", "offer read skipped/failed: " + _toStr(e));
-            return { header: header, items: items, bidderId: bidderId, lines: {} };
-          });
+//
+        // [P20-xx] offer lines（可能なら）←このブロックを置き換え
+return bidRef.collection("offers").doc(bidderId).get()
+  .then(function(os){
+    if(!os.exists){
+      return { header: header, items: items, bidderId: bidderId, lines: {}, profile: null };
+    }
+    var od = os.data() || {};
+    var lines = od.lines || {};
+    var profile = od.profile || null; // ★追加
+    return { header: header, items: items, bidderId: bidderId, lines: lines, profile: profile };
+  })
+  .catch(function(e){
+    L("pdfData", "offer read skipped/failed: " + _toStr(e));
+    return { header: header, items: items, bidderId: bidderId, lines: {}, profile: null };
+  });
+//          
+          
       });
     });
   }
@@ -299,20 +304,46 @@
     // =====================================================
     // [P30-20] セクション2：入札者情報（枠だけ先に）
     // =====================================================
-    text(x, y, "【入札者情報】", 14, true, "left");
-    y += 18;
+  // [P30-20] セクション2：入札者情報（Cookieなし → offer.profile or 画面入力）
+text(x, y, "【入札者情報】", 14, true, "left");
+y += 18;
 
-    // Cookieの内容をここに入れる想定（今回は枠だけ）
-    ctx.strokeStyle = "#111827";
-    ctx.lineWidth = 1;
-    box(x, y, innerW, 70);
-    ctx.fillStyle = "#6b7280";
-    ctx.font = "12px " + FONT_SANS;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("（次に実装）会社名 / 住所 / 代表者名 / 担当者名 / 連絡先 / メール", x+8, y+8);
+box(x, y, innerW, 84);
 
-    y += 70 + secGap;
+// ★(1) Firestore offers の profile
+var p = (data && data.profile) ? data.profile : null;
+
+// ★(2) 無ければ画面入力欄から取得（存在する場合だけ）
+function gv(id){
+  try{
+    var el = document.getElementById(id);
+    return el && el.value ? ("" + el.value).trim() : "";
+  }catch(e){ return ""; }
+}
+if(!p){
+  p = {
+    companyName: gv("txtCompanyName"),
+    address: gv("txtAddress"),
+    representativeName: gv("txtRepresentativeName"),
+    contactName: gv("txtContactName"),
+    contactInfo: gv("txtContactInfo"),
+    email: gv("txtEmail")
+  };
+}
+
+// ★表示（無ければ空欄のまま）
+ctx.fillStyle = "#111827";
+ctx.font = "12px " + FONT_SANS;
+ctx.textAlign = "left";
+ctx.textBaseline = "top";
+
+ctx.fillText("会社名: " + (p.companyName || ""),        x+8, y+8);
+ctx.fillText("住所: "   + (p.address || ""),           x+8, y+24);
+ctx.fillText("代表者: " + (p.representativeName || ""),x+8, y+40);
+ctx.fillText("担当者: " + (p.contactName || "") + "  連絡先: " + (p.contactInfo || ""), x+8, y+56);
+ctx.fillText("メール: " + (p.email || ""),             x+8, y+72);
+
+y += 84 + secGap;
 
     // =====================================================
     // [P30-30] セクション3：納入条件（note1〜note4 を入れる予定）
