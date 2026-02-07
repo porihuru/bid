@@ -57,13 +57,16 @@
   function writeProfileToUI(p){
     // [PF-02] state.profile -> UI
     p = p || {};
-    function s(id, val){ var el=document.getElementById(id); if(el){ el.value = val || ""; } }
-    s("pEmail",   p.email);
-    s("pAddress", p.address);
-    s("pCompany", p.company);
-    s("pRep",     p.rep);
-    s("pPerson",  p.person);
-    s("pTel",     p.tel);
+    // ★ここを置き換え★ [PF-02-01] 反映先IDを実画面（txt〜）に合わせる
+  function s(id, val){ var el=document.getElementById(id); if(el){ el.value = val || ""; } }
+
+  s("txtCompanyName",        p.companyName);
+  s("txtAddress",            p.address);
+  s("txtRepresentativeName", p.representativeName);
+  s("txtContactName",        p.contactName);
+  s("txtContactInfo",        p.contactInfo);
+  s("txtEmail",              p.email);
+  // ★ここまで置き換え★
   }
 
   function saveCookie(){
