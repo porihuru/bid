@@ -1,7 +1,7 @@
 /* [JST 2026-01-24 21:00]  02_bidder_state.js v20260124-01 */
 (function(){
   var FILE = "02_bidder_state.js";
-  var VER  = "v20260124-01";
+  var VER  = "v20260124-02";
   var TS   = new Date().toISOString();
 
   function safeLog(tag, msg){
@@ -159,6 +159,21 @@
     // [ST-03] 必須チェック
     var p = state.profile;
     var ok = !!(p.email && p.address && p.company && p.rep && p.person && p.tel);
+    
+    
+// ★ここを修正★ [ST-02-CP-01]
+try{
+  var p2 = (window.BidderState && window.BidderState.get)
+    ? (window.BidderState.get().profile || {})
+    : {};
+  L("profileChk", JSON.stringify({
+    email: p2.email, address: p2.address, company: p2.company,
+    rep: p2.rep, person: p2.person, tel: p2.tel
+  }));
+}catch(e){}
+// ★ここまで修正★  
+    
+    
     setProfileState(ok ? "COMPLETE" : "INCOMPLETE");
     return ok;
   }
