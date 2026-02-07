@@ -1,7 +1,7 @@
 /* [JST 2026-01-24 21:00]  06_bidder_profile.js v20260124-01 */
 (function(){
   var FILE = "06_bidder_profile.js";
-  var VER  = "v20260204-01";
+  var VER  = "v20260208-01";
   var TS   = new Date().toISOString();
 
   function L(tag, msg){
