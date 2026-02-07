@@ -30,15 +30,28 @@
 
   function readProfileFromUI(){
     // [PF-01] UI -> state.profile
-    function v(id){ var el=document.getElementById(id); return el? (el.value||"") : ""; }
-    return {
-      email:   v("pEmail"),
-      address: v("pAddress"),
-      company: v("pCompany"),
-      rep:     v("pRep"),
-      person:  v("pPerson"),
-      tel:     v("pTel")
-    };
+    // ★ここを置き換え★ [PF-01-01] 入力欄IDを実画面（txt〜）に合わせる
+  function v(id){ var el=document.getElementById(id); return el? (el.value||"") : ""; }
+
+  // bidderId も一緒に入れておく（cookieの安全策にも使える）
+  var bidderId = "";
+  try{
+    if(window.BidderState && window.BidderState.get){
+      var st = window.BidderState.get();
+      bidderId = (st && st.bidderId) ? (""+st.bidderId) : "";
+    }
+  }catch(e){}
+
+  return {
+    bidderId: bidderId,
+    companyName:        v("txtCompanyName"),
+    address:            v("txtAddress"),
+    representativeName: v("txtRepresentativeName"),
+    contactName:        v("txtContactName"),
+    contactInfo:        v("txtContactInfo"),
+    email:              v("txtEmail")
+  };
+  // ★ここまで置き換え★
   }
 
   function writeProfileToUI(p){
