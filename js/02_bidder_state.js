@@ -159,18 +159,28 @@
     // [ST-03] 必須チェック
     var p = state.profile;
     var ok = !!(p.email && p.address && p.company && p.rep && p.person && p.tel);
+
+// ★ここを追加★ [ST-03-CP-01] 必須判定の中身をログに出す（state.profile を直接）
+  try{
+    L("profileChk", JSON.stringify({
+      email: p.email, address: p.address, company: p.company,
+      rep: p.rep, person: p.person, tel: p.tel
+    }));
+  }catch(e){}
+  // ★ここまで追加★
+
     
     
 // ★ここを修正★ [ST-02-CP-01]
-try{
-  var p2 = (window.BidderState && window.BidderState.get)
-    ? (window.BidderState.get().profile || {})
-    : {};
-  L("profileChk", JSON.stringify({
-    email: p2.email, address: p2.address, company: p2.company,
-    rep: p2.rep, person: p2.person, tel: p2.tel
-  }));
-}catch(e){}
+//try{
+  //var p2 = (window.BidderState && window.BidderState.get)
+    //? (window.BidderState.get().profile || {})
+    //: {};
+  //L("profileChk", JSON.stringify({
+    //email: p2.email, address: p2.address, company: p2.company,
+    //rep: p2.rep, person: p2.person, tel: p2.tel
+  //}));
+//}catch(e){}
 // ★ここまで修正★  
     
     
