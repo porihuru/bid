@@ -1,2 +1,2 @@
 # bid
-test
+test.
